@@ -220,16 +220,19 @@ _STAGGER_FUNCTIONS_TEMPLATE = r"""
 
 _NOTE_NAME_LETTERS_TEMPLATE = r"""
 % Capital note letters (matching the chord-quality labels' style, e.g. "Dm"
-% rather than "d minor"), with a properly small accidental. LilyPond's own
-% accidental->text-markup (make-smaller-markup under the hood) scales
-% *relative to the ambient font-size at markup-interpretation time* — which
-% turned out to differ noticeably between a single note-name moment and a
-% multi-voice-merged one, so the "smaller" glyph came out looking the same
-% size as the letter (or bigger) in exactly the cases this whole thing was
-% meant to fix. Force an absolute font-size directly on just the glyph
-% instead, so it's the same small size everywhere regardless of context.
+% rather than "d minor"), with a properly small, raised (superscript-style)
+% accidental. LilyPond's own accidental->text-markup (make-smaller-markup
+% under the hood) scales *relative to the ambient font-size at
+% markup-interpretation time* — which turned out to differ noticeably
+% between a single note-name moment and a multi-voice-merged one, so the
+% "smaller" glyph came out looking the same size as the letter (or bigger)
+% in exactly the cases this whole thing was meant to fix. Force an absolute
+% font-size directly on just the glyph instead, so it's the same small size
+% everywhere regardless of context, then raise it — without this it sits at
+% the glyph's own baseline, which reads as subscript next to a capital
+% letter rather than the superscript style real chord-symbol accidentals use.
 #(define (eroica-accidental-glyph alt)
-   (make-fontsize-markup -6 (make-accidental-markup alt)))
+   (make-raise-markup 1.6 (make-fontsize-markup -6 (make-accidental-markup alt))))
 
 #(define chord-root-letters (vector "C" "D" "E" "F" "G" "A" "B"))
 
