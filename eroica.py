@@ -21,16 +21,16 @@ FLAT_ALIASES = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 LEGEND_ORDER = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
 LEGEND_LABELS = {
     "C": "C",
-    "C#": "C#/Db",
+    "C#": "C♯/D♭",
     "D": "D",
-    "D#": "D#/Eb",
+    "D#": "D♯/E♭",
     "E": "E",
     "F": "F",
-    "F#": "F#/Gb",
+    "F#": "F♯/G♭",
     "G": "G",
-    "G#": "G#/Ab",
+    "G#": "G♯/A♭",
     "A": "A",
-    "A#": "A#/Bb",
+    "A#": "A♯/B♭",
     "B": "B",
 }
 
@@ -216,10 +216,10 @@ _QUALITY_CIRCLE_TEMPLATE = r"""
           (alt (ly:pitch-alteration pitch))
           (letter (vector-ref chord-root-letters nn)))
      (cond ((= alt 0) letter)
-           ((= alt 1/2) (string-append letter "#"))
-           ((= alt -1/2) (string-append letter "b"))
-           ((= alt 1) (string-append letter "##"))
-           ((= alt -1) (string-append letter "bb"))
+           ((= alt 1/2) (string-append letter "♯"))
+           ((= alt -1/2) (string-append letter "♭"))
+           ((= alt 1) (string-append letter "♯♯"))
+           ((= alt -1) (string-append letter "♭♭"))
            (else letter))))
 
 % Recognized shapes, as sorted interval sets above a candidate root. Only
@@ -334,9 +334,13 @@ _SCORE_BLOCK = r"""
   \new PianoStaff
   <<
     \new Staff = "up" { \colorNotes \chordNames \unfoldRepeats \upMusic }
-    \new NoteNames { \colorNoteNames \chordNoteNameStack \unfoldRepeats \upMusic }
+    \new NoteNames \with { \accepts "Voice" } {
+      \colorNoteNames \chordNoteNameStack \unfoldRepeats \upMusic
+    }
     \new Staff = "down" { \colorNotes \chordNames \unfoldRepeats \downMusic }
-    \new NoteNames { \colorNoteNames \chordNoteNameStack \unfoldRepeats \downMusic }
+    \new NoteNames \with { \accepts "Voice" } {
+      \colorNoteNames \chordNoteNameStack \unfoldRepeats \downMusic
+    }
   >>
   \layout { }
 }
@@ -396,7 +400,23 @@ def build_preamble(config):
         )
 
     notehead_overrides = []
-    notename_overrides = []
+    # Voice contexts nested inside NoteNames (needed for polyphonic voices.ly
+    # content, see the \accepts "Voice" below) bring their own normal
+    # note-drawing engravers along with them, so real noteheads/stems/etc
+    # would otherwise get drawn right alongside the note-name text. Hide
+    # everything except the text and its accidental — this has no effect on
+    # single-voice content (nothing here is drawn in that case anyway).
+    notename_overrides = [
+        r"  \override NoteHead.transparent = ##t",
+        r"  \override Stem.transparent = ##t",
+        r"  \override Flag.transparent = ##t",
+        r"  \override Beam.transparent = ##t",
+        r"  \override Slur.transparent = ##t",
+        r"  \override Tie.transparent = ##t",
+        r"  \override Rest.transparent = ##t",
+        r"  \override MultiMeasureRest.transparent = ##t",
+        r"  \override Dots.transparent = ##t",
+    ]
     if colors_on:
         notehead_overrides += [
             r"  \override NoteHead.color = #pitch-class-color",
