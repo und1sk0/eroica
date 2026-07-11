@@ -435,6 +435,13 @@ def build_preamble(config):
         r"  \override Rest.transparent = ##t",
         r"  \override MultiMeasureRest.transparent = ##t",
         r"  \override Dots.transparent = ##t",
+        # Multi-voice moments (two voices merged into one note-name column,
+        # e.g. a melody note + a chord in the other voice) otherwise inherit
+        # a noticeably larger ambient font-size than single-voice moments do,
+        # making their accidental glyphs look oversized/hash-like by
+        # comparison even though it's the same accidental->text-markup glyph
+        # either way. Pin an explicit size so it's consistent regardless.
+        r"  \override NoteName.font-size = #-2",
     ]
     if colors_on:
         notehead_overrides += [
