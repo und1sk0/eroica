@@ -1,0 +1,29 @@
+{
+  "colors": {
+    "enabled": true,
+    "colordict": {
+      "C": "#73cf17",
+      "C#": "#17cf17",
+      "D": "#17cf73",
+      "D#": "#17cfcf",
+      "E": "#1773cf",
+      "F": "#1717cf",
+      "F#": "#7317cf",
+      "G": "#cf17cf",
+      "G#": "#cf1773",
+      "A": "#cf1717",
+      "A#": "#cf7317",
+      "B": "#cfcf17"
+    }
+  },
+  "chordStagger": {
+    "enabled": true,
+    "step": 0.6
+  },
+  "chordQualityCircle": {
+    "enabled": true
+  },
+  "chordNoteStack": {
+    "enabled": true
+  }
+}

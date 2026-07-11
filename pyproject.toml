@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eroica"
+dynamic = ["version"]
+description = "Colorize and annotate LilyPond piano scores by pitch class and chord"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+eroica = "eroica:main"
+
+[tool.hatch.version]
+source = "vcs"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
