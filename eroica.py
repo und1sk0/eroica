@@ -514,7 +514,7 @@ def render(
 
     lilypond_out_stem = str(out_path.with_suffix(""))
     result = subprocess.run(
-        [lilypond_bin, "-o", lilypond_out_stem, str(ly_path)],
+        [lilypond_bin, "-dno-point-and-click", "-o", lilypond_out_stem, str(ly_path)],
         capture_output=True,
         text=True,
     )
