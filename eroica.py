@@ -400,7 +400,23 @@ def build_preamble(config):
         )
 
     notehead_overrides = []
-    notename_overrides = []
+    # Voice contexts nested inside NoteNames (needed for polyphonic voices.ly
+    # content, see the \accepts "Voice" below) bring their own normal
+    # note-drawing engravers along with them, so real noteheads/stems/etc
+    # would otherwise get drawn right alongside the note-name text. Hide
+    # everything except the text and its accidental — this has no effect on
+    # single-voice content (nothing here is drawn in that case anyway).
+    notename_overrides = [
+        r"  \override NoteHead.transparent = ##t",
+        r"  \override Stem.transparent = ##t",
+        r"  \override Flag.transparent = ##t",
+        r"  \override Beam.transparent = ##t",
+        r"  \override Slur.transparent = ##t",
+        r"  \override Tie.transparent = ##t",
+        r"  \override Rest.transparent = ##t",
+        r"  \override MultiMeasureRest.transparent = ##t",
+        r"  \override Dots.transparent = ##t",
+    ]
     if colors_on:
         notehead_overrides += [
             r"  \override NoteHead.color = #pitch-class-color",
