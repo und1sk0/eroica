@@ -1,0 +1,26 @@
+name: PR checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dev deps
+        run: uv sync --group dev
+
+      - name: Lint
+        run: uv run ruff check eroica.py
+
+      - name: Format check
+        run: uv run ruff format --check eroica.py

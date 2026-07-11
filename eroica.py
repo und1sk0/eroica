@@ -20,8 +20,18 @@ FLAT_ALIASES = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 # the wheel, show both spellings for the black keys.
 LEGEND_ORDER = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
 LEGEND_LABELS = {
-    "C": "C", "C#": "C#/Db", "D": "D", "D#": "D#/Eb", "E": "E", "F": "F",
-    "F#": "F#/Gb", "G": "G", "G#": "G#/Ab", "A": "A", "A#": "A#/Bb", "B": "B",
+    "C": "C",
+    "C#": "C#/Db",
+    "D": "D",
+    "D#": "D#/Eb",
+    "E": "E",
+    "F": "F",
+    "F#": "F#/Gb",
+    "G": "G",
+    "G#": "G#/Ab",
+    "A": "A",
+    "A#": "A#/Bb",
+    "B": "B",
 }
 
 # Validated by hand against fur_elise_first_minute.ly: A=red, then stepping
