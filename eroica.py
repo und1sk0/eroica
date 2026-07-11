@@ -188,13 +188,12 @@ __COLOR_VECTOR_LINES__
          (vector-ref note-pitch-colors (modulo (ly:pitch-semitones pitch) 12))
          (rgb-color 0 0 0))))
 
-% For the legend's black-key entries ("C#/Db" etc): draws the accidental
-% with LilyPond's own music-font glyph via accidental->text-markup, same as
-% pitch-root-name, rather than a plain Unicode character at full text size.
+% For the legend's black-key entries ("C#/Db" etc): same eroica-accidental-glyph
+% as pitch-root-name, rather than a plain Unicode character at full text size.
 #(define (legend-sharp-flat-markup sharp-letter flat-letter)
    (make-concat-markup
-     (list sharp-letter (accidental->text-markup 1/2)
-           "/" flat-letter (accidental->text-markup -1/2))))
+     (list sharp-letter (eroica-accidental-glyph 1/2)
+           "/" flat-letter (eroica-accidental-glyph -1/2))))
 """
 
 _STAGGER_FUNCTIONS_TEMPLATE = r"""
@@ -221,13 +220,17 @@ _STAGGER_FUNCTIONS_TEMPLATE = r"""
 
 _NOTE_NAME_LETTERS_TEMPLATE = r"""
 % Capital note letters (matching the chord-quality labels' style, e.g. "Dm"
-% rather than "d minor") with the accidental drawn via LilyPond's own
-% music-font glyph (accidental->text-markup — same engraver used for real
-% accidentals on the staff), rather than a plain-text character sitting at
-% full size, which reads as indistinguishable from a hash mark. Used both
-% for the chord-quality guesser below and as a full replacement for
-% NoteNames' own (lowercase) noteNameFunction, so plain note-name text is
-% capitalized too — see the \set in colorNoteNames.
+% rather than "d minor"), with a properly small accidental. LilyPond's own
+% accidental->text-markup (make-smaller-markup under the hood) scales
+% *relative to the ambient font-size at markup-interpretation time* — which
+% turned out to differ noticeably between a single note-name moment and a
+% multi-voice-merged one, so the "smaller" glyph came out looking the same
+% size as the letter (or bigger) in exactly the cases this whole thing was
+% meant to fix. Force an absolute font-size directly on just the glyph
+% instead, so it's the same small size everywhere regardless of context.
+#(define (eroica-accidental-glyph alt)
+   (make-fontsize-markup -6 (make-accidental-markup alt)))
+
 #(define chord-root-letters (vector "C" "D" "E" "F" "G" "A" "B"))
 
 #(define (pitch-root-name pitch)
@@ -236,7 +239,7 @@ _NOTE_NAME_LETTERS_TEMPLATE = r"""
           (letter (vector-ref chord-root-letters nn)))
      (if (= alt 0)
          letter
-         (make-concat-markup (list letter (accidental->text-markup alt))))))
+         (make-concat-markup (list letter (eroica-accidental-glyph alt))))))
 """
 
 _QUALITY_CIRCLE_TEMPLATE = r"""
@@ -306,19 +309,15 @@ chordNames = #(define-music-function (music) (ly:music?) music)
 """
 
 _NOTE_STACK_TEMPLATE = r"""
-% --- Replace the note-name row's slash-joined chord text ("f/g/bf") with a
+% --- Replace the note-name row's slash-joined chord text ("F/G/Bb") with a
 % circled, top-down stack of the same letters (no slashes). Order is
 % preserved exactly as written in the chord. Single notes are untouched.
-#(define (note-letter-markup pitch)
-   (let ((alt (ly:pitch-alteration pitch)))
-     (if (= alt 0)
-         (pitch->name pitch)
-         (make-concat-markup (list (pitch->name pitch) (accidental->text-markup alt))))))
-
+% Reuses pitch-root-name directly — same capitalized letter + properly
+% small accidental as everywhere else note names appear.
 #(define (stacked-chord-markup pitches)
    (make-circle-markup
      (make-fontsize-markup -3
-       (make-center-column-markup (map note-letter-markup pitches)))))
+       (make-center-column-markup (map pitch-root-name pitches)))))
 
 #(define (add-stacked-chord-label m)
    (if (music-is-of-type? m 'event-chord)
