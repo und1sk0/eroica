@@ -334,9 +334,13 @@ _SCORE_BLOCK = r"""
   \new PianoStaff
   <<
     \new Staff = "up" { \colorNotes \chordNames \unfoldRepeats \upMusic }
-    \new NoteNames { \colorNoteNames \chordNoteNameStack \unfoldRepeats \upMusic }
+    \new NoteNames \with { \accepts "Voice" } {
+      \colorNoteNames \chordNoteNameStack \unfoldRepeats \upMusic
+    }
     \new Staff = "down" { \colorNotes \chordNames \unfoldRepeats \downMusic }
-    \new NoteNames { \colorNoteNames \chordNoteNameStack \unfoldRepeats \downMusic }
+    \new NoteNames \with { \accepts "Voice" } {
+      \colorNoteNames \chordNoteNameStack \unfoldRepeats \downMusic
+    }
   >>
   \layout { }
 }
