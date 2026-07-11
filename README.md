@@ -18,16 +18,34 @@ letters circled below it instead of slash-joined.
 uv tool install git+https://github.com/und1sk0/eroica
 ```
 
-This puts an `eroica` command in your PATH (`~/.local/bin/`).
+This puts an `eroica` command on your PATH (`~/.local/bin/` by default). If
+`eroica: command not found` right after installing, your shell hasn't picked
+up that directory yet — run `uv tool update-shell` and open a new terminal,
+or add `~/.local/bin` to `PATH` yourself.
 
-**For local development:**
+Check it worked:
 
 ```bash
+eroica --help
+```
+
+**For local development**, clone the repo and install from the working copy
+instead of the git URL:
+
+```bash
+git clone git@github.com:und1sk0/eroica.git
+cd eroica
 uv tool install --editable .
 ```
 
 The `--editable` flag means changes to the source are reflected immediately
 without reinstalling.
+
+To upgrade an existing install to the latest commit/tag:
+
+```bash
+uv tool upgrade eroica
+```
 
 To uninstall:
 
@@ -85,11 +103,24 @@ when input and output share a stem (e.g. `voices.ly` -> `voices.pdf`).
 eroica render examples/fur-elise/voices.ly -o /tmp/fur-elise.pdf --title "Für Elise" --composer "Ludwig van Beethoven"
 ```
 
+### 4. Excerpt by duration (optional)
+
+```bash
+eroica excerpt my-piece/voices.ly --seconds 60 -o my-piece/excerpt.ly
+```
+
+Cuts `upMusic`/`downMusic` down to at least the given number of seconds,
+unfolding any repeats in the process (a partial cut can't be represented
+with repeat brackets anymore). Requires a single, constant `\tempo` marking
+(e.g. `\tempo 4 = 72`) — pieces with tempo changes aren't supported yet and
+will error out rather than guess. Render the result normally with
+`eroica render`.
+
 ## config.json
 
 ```json
 {
-  "colors": { "enabled": true, "colordict": { "C": "#73cf17", "...": "..." } },
+  "colors": { "enabled": true, "colordict": { "C": "#4f8e10", "...": "..." } },
   "chordStagger": { "enabled": true, "step": 0.6 },
   "chordQualityCircle": { "enabled": true },
   "chordNoteStack": { "enabled": true }
@@ -104,6 +135,11 @@ eroica render examples/fur-elise/voices.ly -o /tmp/fur-elise.pdf --title "Für E
   and `Db` are the same slot). Flat spellings (`Db`, `Eb`, `Gb`, `Ab`, `Bb`)
   are accepted as aliases when editing by hand. You only need to include the
   notes you want to override — anything you omit keeps the default color.
+  For picking replacement colors by hex/RGB, the
+  [Wikipedia ANSI escape code 8-bit color table](https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit)
+  is a handy reference (256-color swatches with their RGB and hex values
+  side by side) — watch legibility on white paper the way B, C, and D's
+  defaults had to be darkened from their raw wheel-step values.
 - **`chordStagger`** — fans out chord notes diagonally (bottom to top)
   instead of stacking them straight up; `step` is the horizontal offset per
   note, in staff-spaces.
@@ -118,6 +154,6 @@ eroica render examples/fur-elise/voices.ly -o /tmp/fur-elise.pdf --title "Für E
 ## Scope
 
 eroica is an annotator, not a transcription tool — it expects the notes to
-already be written down as LilyPond. It also doesn't fetch sheet music or
-figure out "the first N seconds" of a piece; both are piece-specific enough
-that doing them by hand is more reliable than a general solution right now.
+already be written down as LilyPond. It also doesn't fetch sheet music —
+that's piece-specific enough that doing it by hand is more reliable than a
+general solution right now.
