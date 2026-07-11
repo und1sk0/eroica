@@ -21,16 +21,16 @@ FLAT_ALIASES = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 LEGEND_ORDER = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
 LEGEND_LABELS = {
     "C": "C",
-    "C#": "C#/Db",
+    "C#": "C♯/D♭",
     "D": "D",
-    "D#": "D#/Eb",
+    "D#": "D♯/E♭",
     "E": "E",
     "F": "F",
-    "F#": "F#/Gb",
+    "F#": "F♯/G♭",
     "G": "G",
-    "G#": "G#/Ab",
+    "G#": "G♯/A♭",
     "A": "A",
-    "A#": "A#/Bb",
+    "A#": "A♯/B♭",
     "B": "B",
 }
 
@@ -216,10 +216,10 @@ _QUALITY_CIRCLE_TEMPLATE = r"""
           (alt (ly:pitch-alteration pitch))
           (letter (vector-ref chord-root-letters nn)))
      (cond ((= alt 0) letter)
-           ((= alt 1/2) (string-append letter "#"))
-           ((= alt -1/2) (string-append letter "b"))
-           ((= alt 1) (string-append letter "##"))
-           ((= alt -1) (string-append letter "bb"))
+           ((= alt 1/2) (string-append letter "♯"))
+           ((= alt -1/2) (string-append letter "♭"))
+           ((= alt 1) (string-append letter "♯♯"))
+           ((= alt -1) (string-append letter "♭♭"))
            (else letter))))
 
 % Recognized shapes, as sorted interval sets above a candidate root. Only
