@@ -219,15 +219,17 @@ _STAGGER_FUNCTIONS_TEMPLATE = r"""
          (* (note-head-index grob heads) chord-stagger-step))))
 """
 
-_QUALITY_CIRCLE_TEMPLATE = r"""
-% --- Guess a lead-sheet chord name for genuine chords, and circle it ---
+_NOTE_NAME_LETTERS_TEMPLATE = r"""
+% Capital note letters (matching the chord-quality labels' style, e.g. "Dm"
+% rather than "d minor") with the accidental drawn via LilyPond's own
+% music-font glyph (accidental->text-markup — same engraver used for real
+% accidentals on the staff), rather than a plain-text character sitting at
+% full size, which reads as indistinguishable from a hash mark. Used both
+% for the chord-quality guesser below and as a full replacement for
+% NoteNames' own (lowercase) noteNameFunction, so plain note-name text is
+% capitalized too — see the \set in colorNoteNames.
 #(define chord-root-letters (vector "C" "D" "E" "F" "G" "A" "B"))
 
-% Returns a markup, not a plain string: the accidental (if any) is drawn
-% with LilyPond's own music-font glyph (accidental->text-markup, same
-% engraver used for real accidentals on the staff) so it's properly sized
-% and shaped rather than a plain Unicode character sitting at full text
-% size, which reads as indistinguishable from a hash mark.
 #(define (pitch-root-name pitch)
    (let* ((nn (ly:pitch-notename pitch))
           (alt (ly:pitch-alteration pitch))
@@ -235,6 +237,10 @@ _QUALITY_CIRCLE_TEMPLATE = r"""
      (if (= alt 0)
          letter
          (make-concat-markup (list letter (accidental->text-markup alt))))))
+"""
+
+_QUALITY_CIRCLE_TEMPLATE = r"""
+% --- Guess a lead-sheet chord name for genuine chords, and circle it ---
 
 % Recognized shapes, as sorted interval sets above a candidate root. Only
 % clear major/minor (and simple 7th) shapes get a name; anything else (bare
@@ -403,7 +409,7 @@ def build_preamble(config):
     quality_on = config["chordQualityCircle"]["enabled"]
     stack_on = config["chordNoteStack"]["enabled"]
 
-    parts = []
+    parts = [_NOTE_NAME_LETTERS_TEMPLATE]
 
     if colors_on:
         block = _COLOR_FUNCTIONS_TEMPLATE.replace(
@@ -442,6 +448,11 @@ def build_preamble(config):
         # comparison even though it's the same accidental->text-markup glyph
         # either way. Pin an explicit size so it's consistent regardless.
         r"  \override NoteName.font-size = #-2",
+        # Replace NoteNames' own (lowercase) default with pitch-root-name, so
+        # plain note-name text is capitalized like the chord-quality labels
+        # ("D" not "d"), and every note name — single or merged — goes
+        # through the exact same markup-building code path.
+        r"  \set NoteNames.noteNameFunction = #(lambda (pitch context) (pitch-root-name pitch))",
     ]
     if colors_on:
         notehead_overrides += [
