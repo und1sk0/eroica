@@ -16,21 +16,25 @@ PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
 # same slot as its enharmonic sharp name.
 FLAT_ALIASES = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 
-# Display order/labels for the color-legend markup: start at A, step through
-# the wheel, show both spellings for the black keys.
+# Display order/spellings for the color-legend markup: start at A, step
+# through the wheel. Naturals are a single letter; black keys show both
+# enharmonic spellings as (sharp_letter, flat_letter) — the accidental glyph
+# itself is drawn by LilyPond's own music font (see legend-sharp-flat-markup),
+# not typed as a plain Unicode character, so it's properly sized/shaped
+# instead of reading like a hash mark.
 LEGEND_ORDER = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
-LEGEND_LABELS = {
+LEGEND_SPELLING = {
     "C": "C",
-    "C#": "C♯/D♭",
+    "C#": ("C", "D"),
     "D": "D",
-    "D#": "D♯/E♭",
+    "D#": ("D", "E"),
     "E": "E",
     "F": "F",
-    "F#": "F♯/G♭",
+    "F#": ("F", "G"),
     "G": "G",
-    "G#": "G♯/A♭",
+    "G#": ("G", "A"),
     "A": "A",
-    "A#": "A♯/B♭",
+    "A#": ("A", "B"),
     "B": "B",
 }
 
@@ -183,6 +187,13 @@ __COLOR_VECTOR_LINES__
      (if (ly:pitch? pitch)
          (vector-ref note-pitch-colors (modulo (ly:pitch-semitones pitch) 12))
          (rgb-color 0 0 0))))
+
+% For the legend's black-key entries ("C#/Db" etc): same eroica-accidental-glyph
+% as pitch-root-name, rather than a plain Unicode character at full text size.
+#(define (legend-sharp-flat-markup sharp-letter flat-letter)
+   (make-concat-markup
+     (list sharp-letter (eroica-accidental-glyph 1/2)
+           "/" flat-letter (eroica-accidental-glyph -1/2))))
 """
 
 _STAGGER_FUNCTIONS_TEMPLATE = r"""
@@ -207,20 +218,35 @@ _STAGGER_FUNCTIONS_TEMPLATE = r"""
          (* (note-head-index grob heads) chord-stagger-step))))
 """
 
-_QUALITY_CIRCLE_TEMPLATE = r"""
-% --- Guess a lead-sheet chord name for genuine chords, and circle it ---
+_NOTE_NAME_LETTERS_TEMPLATE = r"""
+% Capital note letters (matching the chord-quality labels' style, e.g. "Dm"
+% rather than "d minor"), with a properly small, raised (superscript-style)
+% accidental. LilyPond's own accidental->text-markup (make-smaller-markup
+% under the hood) scales *relative to the ambient font-size at
+% markup-interpretation time* — which turned out to differ noticeably
+% between a single note-name moment and a multi-voice-merged one, so the
+% "smaller" glyph came out looking the same size as the letter (or bigger)
+% in exactly the cases this whole thing was meant to fix. Force an absolute
+% font-size directly on just the glyph instead, so it's the same small size
+% everywhere regardless of context, then raise it — without this it sits at
+% the glyph's own baseline, which reads as subscript next to a capital
+% letter rather than the superscript style real chord-symbol accidentals use.
+#(define (eroica-accidental-glyph alt)
+   (make-raise-markup 1.6 (make-fontsize-markup -6 (make-accidental-markup alt))))
+
 #(define chord-root-letters (vector "C" "D" "E" "F" "G" "A" "B"))
 
 #(define (pitch-root-name pitch)
    (let* ((nn (ly:pitch-notename pitch))
           (alt (ly:pitch-alteration pitch))
           (letter (vector-ref chord-root-letters nn)))
-     (cond ((= alt 0) letter)
-           ((= alt 1/2) (string-append letter "♯"))
-           ((= alt -1/2) (string-append letter "♭"))
-           ((= alt 1) (string-append letter "♯♯"))
-           ((= alt -1) (string-append letter "♭♭"))
-           (else letter))))
+     (if (= alt 0)
+         letter
+         (make-concat-markup (list letter (eroica-accidental-glyph alt))))))
+"""
+
+_QUALITY_CIRCLE_TEMPLATE = r"""
+% --- Guess a lead-sheet chord name for genuine chords, and circle it ---
 
 % Recognized shapes, as sorted interval sets above a candidate root. Only
 % clear major/minor (and simple 7th) shapes get a name; anything else (bare
@@ -251,7 +277,7 @@ _QUALITY_CIRCLE_TEMPLATE = r"""
           (iset (interval-set-from pitches root-pc))
           (hit (assoc iset chord-shapes)))
      (if hit
-         (string-append (pitch-root-name root-pitch) (cdr hit))
+         (make-concat-markup (list (pitch-root-name root-pitch) (cdr hit)))
          #f)))
 
 #(define (guess-chord-name pitches)
@@ -286,19 +312,15 @@ chordNames = #(define-music-function (music) (ly:music?) music)
 """
 
 _NOTE_STACK_TEMPLATE = r"""
-% --- Replace the note-name row's slash-joined chord text ("f/g/bf") with a
+% --- Replace the note-name row's slash-joined chord text ("F/G/Bb") with a
 % circled, top-down stack of the same letters (no slashes). Order is
 % preserved exactly as written in the chord. Single notes are untouched.
-#(define (note-letter-markup pitch)
-   (let ((alt (ly:pitch-alteration pitch)))
-     (if (= alt 0)
-         (pitch->name pitch)
-         (make-concat-markup (list (pitch->name pitch) (accidental->text-markup alt))))))
-
+% Reuses pitch-root-name directly — same capitalized letter + properly
+% small accidental as everywhere else note names appear.
 #(define (stacked-chord-markup pitches)
    (make-circle-markup
      (make-fontsize-markup -3
-       (make-center-column-markup (map note-letter-markup pitches)))))
+       (make-center-column-markup (map pitch-root-name pitches)))))
 
 #(define (add-stacked-chord-label m)
    (if (music-is-of-type? m 'event-chord)
@@ -373,8 +395,13 @@ def _scheme_legend_lines(colordict):
     lines = []
     for name in LEGEND_ORDER:
         r, g, b = hex_to_rgb(colordict[name], context=f"colors.colordict.{name}")
-        label = LEGEND_LABELS[name]
-        lines.append(f'      \\with-color #(rgb-color {r:.4f} {g:.4f} {b:.4f}) "{label}"')
+        spelling = LEGEND_SPELLING[name]
+        if isinstance(spelling, tuple):
+            sharp_letter, flat_letter = spelling
+            label_markup = f'#(legend-sharp-flat-markup "{sharp_letter}" "{flat_letter}")'
+        else:
+            label_markup = f'"{spelling}"'
+        lines.append(f"      \\with-color #(rgb-color {r:.4f} {g:.4f} {b:.4f}) {label_markup}")
     return "\n".join(lines)
 
 
@@ -384,7 +411,7 @@ def build_preamble(config):
     quality_on = config["chordQualityCircle"]["enabled"]
     stack_on = config["chordNoteStack"]["enabled"]
 
-    parts = []
+    parts = [_NOTE_NAME_LETTERS_TEMPLATE]
 
     if colors_on:
         block = _COLOR_FUNCTIONS_TEMPLATE.replace(
@@ -416,6 +443,18 @@ def build_preamble(config):
         r"  \override Rest.transparent = ##t",
         r"  \override MultiMeasureRest.transparent = ##t",
         r"  \override Dots.transparent = ##t",
+        # Multi-voice moments (two voices merged into one note-name column,
+        # e.g. a melody note + a chord in the other voice) otherwise inherit
+        # a noticeably larger ambient font-size than single-voice moments do,
+        # making their accidental glyphs look oversized/hash-like by
+        # comparison even though it's the same accidental->text-markup glyph
+        # either way. Pin an explicit size so it's consistent regardless.
+        r"  \override NoteName.font-size = #-2",
+        # Replace NoteNames' own (lowercase) default with pitch-root-name, so
+        # plain note-name text is capitalized like the chord-quality labels
+        # ("D" not "d"), and every note name — single or merged — goes
+        # through the exact same markup-building code path.
+        r"  \set NoteNames.noteNameFunction = #(lambda (pitch context) (pitch-root-name pitch))",
     ]
     if colors_on:
         notehead_overrides += [
