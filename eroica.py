@@ -16,21 +16,25 @@ PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
 # same slot as its enharmonic sharp name.
 FLAT_ALIASES = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 
-# Display order/labels for the color-legend markup: start at A, step through
-# the wheel, show both spellings for the black keys.
+# Display order/spellings for the color-legend markup: start at A, step
+# through the wheel. Naturals are a single letter; black keys show both
+# enharmonic spellings as (sharp_letter, flat_letter) — the accidental glyph
+# itself is drawn by LilyPond's own music font (see legend-sharp-flat-markup),
+# not typed as a plain Unicode character, so it's properly sized/shaped
+# instead of reading like a hash mark.
 LEGEND_ORDER = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
-LEGEND_LABELS = {
+LEGEND_SPELLING = {
     "C": "C",
-    "C#": "C♯/D♭",
+    "C#": ("C", "D"),
     "D": "D",
-    "D#": "D♯/E♭",
+    "D#": ("D", "E"),
     "E": "E",
     "F": "F",
-    "F#": "F♯/G♭",
+    "F#": ("F", "G"),
     "G": "G",
-    "G#": "G♯/A♭",
+    "G#": ("G", "A"),
     "A": "A",
-    "A#": "A♯/B♭",
+    "A#": ("A", "B"),
     "B": "B",
 }
 
@@ -183,6 +187,14 @@ __COLOR_VECTOR_LINES__
      (if (ly:pitch? pitch)
          (vector-ref note-pitch-colors (modulo (ly:pitch-semitones pitch) 12))
          (rgb-color 0 0 0))))
+
+% For the legend's black-key entries ("C#/Db" etc): draws the accidental
+% with LilyPond's own music-font glyph via accidental->text-markup, same as
+% pitch-root-name, rather than a plain Unicode character at full text size.
+#(define (legend-sharp-flat-markup sharp-letter flat-letter)
+   (make-concat-markup
+     (list sharp-letter (accidental->text-markup 1/2)
+           "/" flat-letter (accidental->text-markup -1/2))))
 """
 
 _STAGGER_FUNCTIONS_TEMPLATE = r"""
@@ -211,16 +223,18 @@ _QUALITY_CIRCLE_TEMPLATE = r"""
 % --- Guess a lead-sheet chord name for genuine chords, and circle it ---
 #(define chord-root-letters (vector "C" "D" "E" "F" "G" "A" "B"))
 
+% Returns a markup, not a plain string: the accidental (if any) is drawn
+% with LilyPond's own music-font glyph (accidental->text-markup, same
+% engraver used for real accidentals on the staff) so it's properly sized
+% and shaped rather than a plain Unicode character sitting at full text
+% size, which reads as indistinguishable from a hash mark.
 #(define (pitch-root-name pitch)
    (let* ((nn (ly:pitch-notename pitch))
           (alt (ly:pitch-alteration pitch))
           (letter (vector-ref chord-root-letters nn)))
-     (cond ((= alt 0) letter)
-           ((= alt 1/2) (string-append letter "♯"))
-           ((= alt -1/2) (string-append letter "♭"))
-           ((= alt 1) (string-append letter "♯♯"))
-           ((= alt -1) (string-append letter "♭♭"))
-           (else letter))))
+     (if (= alt 0)
+         letter
+         (make-concat-markup (list letter (accidental->text-markup alt))))))
 
 % Recognized shapes, as sorted interval sets above a candidate root. Only
 % clear major/minor (and simple 7th) shapes get a name; anything else (bare
@@ -251,7 +265,7 @@ _QUALITY_CIRCLE_TEMPLATE = r"""
           (iset (interval-set-from pitches root-pc))
           (hit (assoc iset chord-shapes)))
      (if hit
-         (string-append (pitch-root-name root-pitch) (cdr hit))
+         (make-concat-markup (list (pitch-root-name root-pitch) (cdr hit)))
          #f)))
 
 #(define (guess-chord-name pitches)
@@ -373,8 +387,13 @@ def _scheme_legend_lines(colordict):
     lines = []
     for name in LEGEND_ORDER:
         r, g, b = hex_to_rgb(colordict[name], context=f"colors.colordict.{name}")
-        label = LEGEND_LABELS[name]
-        lines.append(f'      \\with-color #(rgb-color {r:.4f} {g:.4f} {b:.4f}) "{label}"')
+        spelling = LEGEND_SPELLING[name]
+        if isinstance(spelling, tuple):
+            sharp_letter, flat_letter = spelling
+            label_markup = f'#(legend-sharp-flat-markup "{sharp_letter}" "{flat_letter}")'
+        else:
+            label_markup = f'"{spelling}"'
+        lines.append(f"      \\with-color #(rgb-color {r:.4f} {g:.4f} {b:.4f}) {label_markup}")
     return "\n".join(lines)
 
 
