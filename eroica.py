@@ -877,15 +877,17 @@ def find_bar_start_pos(body_text, target_bar):
 
 
 def _extend_past_open_spans(cut_pos, scale_spans, skip_spans):
-    """If cut_pos lands inside a \\tuplet or \\grace span, push it out to the
-    end of that span instead — cutting the text there would otherwise leave
-    a dangling unclosed \\tuplet/\\grace construct."""
+    """If cut_pos lands inside a \\tuplet or \\grace span, push it out past
+    the end of that span instead — cutting the text there would otherwise
+    leave a dangling unclosed \\tuplet/\\grace construct. `e` is the index
+    *of* the span's closing brace (see _find_scale_and_skip_spans), so the
+    push-out target is e + 1 — just past it — not e itself."""
     changed = True
     while changed:
         changed = False
         for s, e, *_ in list(scale_spans) + [(s, e) for s, e in skip_spans]:
             if s <= cut_pos < e:
-                cut_pos = e
+                cut_pos = e + 1
                 changed = True
     return cut_pos
 
