@@ -106,15 +106,17 @@ eroica render examples/fur-elise/voices.ly -o /tmp/fur-elise.pdf --title "Für E
 ### 4. Excerpt by duration (optional)
 
 ```bash
-eroica excerpt my-piece/voices.ly --seconds 60 -o my-piece/excerpt.ly
+eroica excerpt my-piece/voices.ly --start-bar 40 --seconds 20 -o my-piece/excerpt.ly
 ```
 
 Cuts `upMusic`/`downMusic` down to at least the given number of seconds,
-unfolding any repeats in the process (a partial cut can't be represented
-with repeat brackets anymore). Requires a single, constant `\tempo` marking
-(e.g. `\tempo 4 = 72`) — pieces with tempo changes aren't supported yet and
-will error out rather than guess. Render the result normally with
-`eroica render`.
+starting at the given 1-based bar number (both default: bar 1, 60 seconds —
+i.e. `eroica excerpt my-piece/voices.ly` alone gives you the first minute).
+Repeats are unfolded in the process (a partial cut can't be represented with
+repeat brackets anymore). Requires a single, constant `\tempo` marking (e.g.
+`\tempo 4 = 72`) and, if `--start-bar` is more than 1, a `\time` signature —
+pieces with tempo changes aren't supported yet and will error out rather
+than guess. Render the result normally with `eroica render`.
 
 ## config.json
 

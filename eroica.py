@@ -813,6 +813,69 @@ def parse_seconds_per_whole_note(text):
     return seconds_per_beat / float(beat_fraction)
 
 
+_PARTIAL_RE = re.compile(rf"\\partial\s+({_DURATION_RE})")
+_TIME_RE = re.compile(r"\\time\s+(\d+)\s*/\s*(\d+)")
+_MEASURE_POS_RE = re.compile(
+    r"\\set\s+Timing\.measurePosition\s*=\s*#\(ly:make-moment\s+(-?\d+)(?:/(\d+))?\)"
+)
+
+
+def find_bar_start_pos(body_text, target_bar):
+    """Returns the index into body_text where bar `target_bar` (1-based)
+    begins, by walking the same event stream used for duration-cutting and
+    counting measure boundaries. Honors a leading \\partial (pickup measure
+    — the first measure is shorter than the time signature) and any \\set
+    Timing.measurePosition overrides, which is LilyPond's own device for
+    correcting bar-number bookkeeping around an odd \\alternative ending
+    (e.g. Für Elise's first one) — since we're now doing our own
+    independent bar count instead of relying on LilyPond's engraver, we
+    have to honor the same override or our bar numbers would drift from
+    what LilyPond itself would print."""
+    if target_bar <= 1:
+        return 0
+
+    time_m = _TIME_RE.search(body_text)
+    if not time_m:
+        raise ExcerptError("no \\time signature found — needed to count bars")
+    measure_length = Fraction(int(time_m.group(1)), int(time_m.group(2)))
+
+    masked = _mask_non_musical(body_text)
+    events = compute_event_stream(body_text)
+
+    items = [(e[0], "event", e) for e in events]
+    items += [
+        (m.start(), "partial", _duration_value(m.group(1))) for m in _PARTIAL_RE.finditer(masked)
+    ]
+    for m in _MEASURE_POS_RE.finditer(masked):
+        value = Fraction(int(m.group(1)), int(m.group(2)) if m.group(2) else 1)
+        items.append((m.start(), "position", value))
+    items.sort(key=lambda x: x[0])
+
+    current_bar = 1
+    expected_length = measure_length
+    elapsed = Fraction(0)
+    bar_start_pos = 0
+
+    for _pos, kind, payload in items:
+        if kind == "partial":
+            expected_length = payload
+            continue
+        if kind == "position":
+            elapsed = payload if payload >= 0 else measure_length + payload
+            continue
+        _start, end, duration = payload
+        elapsed += duration
+        while elapsed >= expected_length:
+            elapsed -= expected_length
+            current_bar += 1
+            expected_length = measure_length
+            bar_start_pos = end
+            if current_bar == target_bar:
+                return bar_start_pos
+
+    raise ExcerptError(f"requested bar {target_bar} but this voice only has {current_bar} bar(s)")
+
+
 def _extend_past_open_spans(cut_pos, scale_spans, skip_spans):
     """If cut_pos lands inside a \\tuplet or \\grace span, push it out to the
     end of that span instead — cutting the text there would otherwise leave
@@ -849,10 +912,13 @@ def find_excerpt_cut(body_text, seconds_per_whole_note, target_seconds):
     )
 
 
-def excerpt_voices_text(voices_text, target_seconds):
-    """Cut upMusic and downMusic down to (at least) target_seconds of music,
-    at the same elapsed musical time in both voices. Returns the rewritten
+def excerpt_voices_text(voices_text, target_seconds, start_bar=1):
+    """Cut upMusic and downMusic down to (at least) target_seconds of music
+    starting at bar `start_bar` (1-based, default the very beginning), at
+    the same elapsed musical time/bar in both voices. Returns the rewritten
     voices text plus the actual seconds covered (>= target_seconds)."""
+    if start_bar < 1:
+        raise SystemExit("error: excerpt: --start-bar must be 1 or greater")
     try:
         seconds_per_whole_note = parse_seconds_per_whole_note(voices_text)
 
@@ -862,9 +928,29 @@ def excerpt_voices_text(voices_text, target_seconds):
             body_start, body_end = _find_variable_body_span(new_text, name)
             body = new_text[body_start:body_end]
             flat_body = unfold_repeats_text(body)
-            cut_pos, seconds = find_excerpt_cut(flat_body, seconds_per_whole_note, target_seconds)
+
+            events = compute_event_stream(flat_body)
+            if not events:
+                raise ExcerptError(f"{name} has no notes/chords/rests to excerpt")
+            header_end = events[0][0]
+            header = flat_body[:header_end]
+
+            if start_bar > 1:
+                masked = _mask_non_musical(flat_body)
+                scale_spans, skip_spans = _find_scale_and_skip_spans(masked)
+                start_pos = find_bar_start_pos(flat_body, start_bar)
+                start_pos = _extend_past_open_spans(start_pos, scale_spans, skip_spans)
+            else:
+                start_pos = 0
+            excerpt_start = max(start_pos, header_end)
+
+            cut_pos, seconds = find_excerpt_cut(
+                flat_body[excerpt_start:], seconds_per_whole_note, target_seconds
+            )
             actual_seconds = max(actual_seconds or 0, seconds)
-            new_body = f'\n {flat_body[:cut_pos].strip()}\n \\bar "|."\n'
+
+            excerpt_body = flat_body[excerpt_start : excerpt_start + cut_pos]
+            new_body = f'\n {header.strip()}\n {excerpt_body.strip()}\n \\bar "|."\n'
             new_text = new_text[:body_start] + new_body + new_text[body_end:]
     except ExcerptError as e:
         raise SystemExit(f"error: excerpt: {e}") from e
@@ -872,7 +958,7 @@ def excerpt_voices_text(voices_text, target_seconds):
     return new_text, actual_seconds
 
 
-def excerpt(input_path, output_path, seconds):
+def excerpt(input_path, output_path, seconds, *, start_bar=1):
     voices_path = Path(input_path)
     if not voices_path.exists():
         raise SystemExit(f"error: input file not found: {voices_path}")
@@ -884,14 +970,15 @@ def excerpt(input_path, output_path, seconds):
             f"error: {voices_path} is missing required variable(s): {', '.join(missing)}"
         )
 
-    new_text, actual_seconds = excerpt_voices_text(voices_text, seconds)
+    new_text, actual_seconds = excerpt_voices_text(voices_text, seconds, start_bar=start_bar)
 
     out_path = Path(output_path)
     if out_path.resolve() == voices_path.resolve():
         raise SystemExit("error: refusing to overwrite input file — choose a different -o/--output")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(new_text)
-    print(f"wrote {out_path} ({actual_seconds:.1f}s, requested >= {seconds}s)")
+    bar_note = f", starting at bar {start_bar}" if start_bar > 1 else ""
+    print(f"wrote {out_path} ({actual_seconds:.1f}s{bar_note}, requested >= {seconds}s)")
     return out_path
 
 
@@ -936,6 +1023,7 @@ def cmd_excerpt(args):
         args.input,
         args.output or str(Path(args.input).with_name(Path(args.input).stem + ".excerpt.ly")),
         args.seconds,
+        start_bar=args.start_bar,
     )
 
 
@@ -980,7 +1068,16 @@ def main():
     )
     p_excerpt.add_argument("input", help="path to a voices .ly file (defines upMusic/downMusic)")
     p_excerpt.add_argument(
-        "--seconds", type=float, required=True, help="minimum duration of the excerpt, in seconds"
+        "--seconds",
+        type=float,
+        default=60.0,
+        help="minimum duration of the excerpt, in seconds (default: 60)",
+    )
+    p_excerpt.add_argument(
+        "--start-bar",
+        type=int,
+        default=1,
+        help="1-based bar number to start the excerpt at (default: 1, the beginning)",
     )
     p_excerpt.add_argument(
         "-o",
