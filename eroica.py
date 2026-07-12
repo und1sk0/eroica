@@ -461,15 +461,27 @@ def build_preamble(config):
         r"  \set NoteNames.noteNameFunction = #(lambda (pitch context) (pitch-root-name pitch))",
     ]
     if colors_on:
+        # Staff-qualified, NOT bare `\override NoteHead.color`. An unqualified
+        # override binds to the *Voice* context — specifically the implicit Voice
+        # LilyPond opens for the staff's contents. That's fine for single-voice
+        # music, but polyphonic voices.ly content (`\new Voice { \voiceOne ... }`,
+        # e.g. Gymnopédie No. 1's melody-over-accompaniment right hand, or
+        # Gnossienne No. 3's left hand) creates *fresh* Voice contexts that
+        # inherit none of it — so every notehead in them rendered plain black
+        # while the NoteNames row beside them was correctly colored. Setting the
+        # property on Staff instead propagates it down to every Voice in the
+        # staff, implicit or explicit.
         notehead_overrides += [
-            r"  \override NoteHead.color = #pitch-class-color",
-            r"  \override Accidental.color = #pitch-class-color",
-            r"  \override Stem.color = #pitch-class-color",
+            r"  \override Staff.NoteHead.color = #pitch-class-color",
+            r"  \override Staff.Accidental.color = #pitch-class-color",
+            r"  \override Staff.Stem.color = #pitch-class-color",
         ]
         notename_overrides.append(r"  \override NoteName.color = #pitch-class-color")
     if stagger_on:
+        # Same reasoning as above — must reach explicit Voice contexts too, or
+        # chords in a polyphonic staff stack instead of fanning out.
         notehead_overrides.append(
-            "  \\override NoteHead.X-offset = #(grob-transformer 'X-offset\n"
+            "  \\override Staff.NoteHead.X-offset = #(grob-transformer 'X-offset\n"
             "     (lambda (grob orig) (+ orig (chord-stagger-amount grob))))"
         )
 

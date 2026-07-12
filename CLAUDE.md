@@ -29,14 +29,32 @@ Mutopia `.ly` file is never usable as-is. Adapting one means:
   tweaks) from the original engraving — those reflect real engraving
   decisions, not incidental Mutopia-file structure.
 - Genuinely polyphonic content within one hand (two independent voices in
-  one staff, e.g. Gnossienne No. 3's LH) needs explicit
+  one staff, e.g. Gnossienne No. 3's LH, or Gymnopédie No. 1's RH melody
+  over its own accompaniment chords) needs explicit
   `\new Voice { \voiceOne ... }` / `\new Voice { \voiceTwo ... }` in the
-  adapted body. This works out of the box — `_SCORE_BLOCK`'s
-  `\new NoteNames \with { \accepts "Voice" }` plus the notehead-engraver
-  transparency overrides in `build_preamble` already handle it (this was
-  the fix in `fix/notenames-voice-polyphony`, validated against
-  Gnossienne No. 3). Nothing extra needed from the adapter; just know why
-  it renders correctly instead of spawning a stray staff.
+  adapted body. Nothing extra is needed from the adapter, but two separate
+  pieces of machinery have to be in place for it to render correctly, and
+  it's worth knowing they are *different* mechanisms:
+  - The **note-name row** works because `_SCORE_BLOCK` declares
+    `\new NoteNames \with { \accepts "Voice" }`, plus the notehead-engraver
+    transparency overrides in `build_preamble` (the
+    `fix/notenames-voice-polyphony` change).
+  - The **noteheads themselves** work because `colorNotes` qualifies its
+    overrides to `Staff.` (`\override Staff.NoteHead.color`, not a bare
+    `\override NoteHead.color`). An unqualified override binds to the
+    *Voice* context — specifically the implicit Voice LilyPond opens for a
+    staff's contents — and an explicit `\new Voice` is a **fresh** context
+    that inherits none of it. Setting the property on `Staff` propagates it
+    down to every Voice in the staff, implicit or explicit.
+
+  Historical note, since it's an easy trap to fall back into: this file used
+  to claim polyphony "works out of the box, validated against Gnossienne
+  No. 3." That was only ever true of the note-name row. Notehead coloring was
+  silently broken for *every* polyphonic piece — including the shipped
+  Gnossienne No. 3 example, whose noteheads rendered plain black while the
+  names beside them were correctly colored. Single-voice pieces (Für Elise)
+  were unaffected, which is why it went unnoticed. Fixed in
+  `fix/color-polyphonic-voices`.
 
 ## Excerpt/duration engine (eroica.py, "Auto-excerpt by duration" section)
 

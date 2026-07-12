@@ -90,8 +90,8 @@ dynamics, `\clef` changes mid-voice, grace notes, etc. Worked examples:
   tuplets, an ottava run, grace notes/appoggiaturas.
 - `examples/gnossienne-no-3/voices.ly` — genuine two-voice-per-hand
   polyphony (`\new Voice { \voiceOne ... }` / `\new Voice { \voiceTwo ... }`
-  inside one staff), which is why `NoteNames` needs `\accepts "Voice"`
-  (see `CLAUDE.md`).
+  inside one staff). Both the `NoteNames` row and the noteheads have to be
+  taught to reach into those explicitly-created voices — see `CLAUDE.md`.
 
 ### 3. Render
 
