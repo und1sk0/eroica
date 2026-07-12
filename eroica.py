@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 # 12 pitch classes, C=0 .. B=11 (semitones above C) — matches the
@@ -40,11 +41,14 @@ LEGEND_SPELLING = {
 
 # Validated by hand against fur_elise_first_minute.ly: A=red, then stepping
 # around the hue wheel (30 degrees/semitone) through ROYGBIV, with
-# interstitial hues filling in the other 5 chromatic notes.
+# interstitial hues filling in the other 5 chromatic notes. C, D, and B are
+# darkened relative to the raw wheel step (same hue, scaled down) — at full
+# brightness their high green/yellow content read as nearly invisible on
+# white paper, B worst of all since it's pure bright yellow.
 DEFAULT_COLORDICT = {
-    "C": "#73cf17",
+    "C": "#4f8e10",
     "C#": "#17cf17",
-    "D": "#17cf73",
+    "D": "#119a56",
     "D#": "#17cfcf",
     "E": "#1773cf",
     "F": "#1717cf",
@@ -53,7 +57,7 @@ DEFAULT_COLORDICT = {
     "G#": "#cf1773",
     "A": "#cf1717",
     "A#": "#cf7317",
-    "B": "#cfcf17",
+    "B": "#80800e",
 }
 
 DEFAULT_CONFIG = {
@@ -571,6 +575,416 @@ def render(
 
 
 # --------------------------------------------------------------------------
+# Auto-excerpt by duration
+# --------------------------------------------------------------------------
+# Cuts upMusic/downMusic down to "at least N seconds" of music. Repeats are
+# unfolded textually first (a partial cut can't be represented with repeat
+# brackets any more than the hand-built fur_elise_first_minute.ly excerpt
+# could), then both voices are walked as a flat stream of duration-bearing
+# events (notes/chords/rests) and cut at the same elapsed musical time —
+# not the same measure *index* — since that's the one thing guaranteed to
+# line up between two independently-written voices.
+#
+# Scope, deliberately: a single constant \tempo and no per-voice tempo
+# changes. Anything fancier (accelerandos, multiple tempo marks) errors out
+# clearly rather than silently picking one, matching the "guess nothing
+# that isn't really there" philosophy already used for chord-quality
+# detection.
+
+
+class ExcerptError(Exception):
+    """Raised for anything that prevents computing/cutting an excerpt."""
+
+
+def _find_matching_brace(text, open_pos):
+    """text[open_pos] must be '{'. Returns the index of its matching '}'."""
+    depth = 0
+    i = open_pos
+    n = len(text)
+    while i < n:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    raise ExcerptError(f"unbalanced braces starting at position {open_pos}")
+
+
+def _find_variable_body_span(text, name):
+    """Returns (body_start, body_end) — indices strictly inside the braces
+    of `name = { ... }` — or raises ExcerptError if not found."""
+    m = re.search(rf"(?m)^\s*{re.escape(name)}\s*=\s*\{{", text)
+    if not m:
+        raise ExcerptError(f"could not find `{name} = {{ ... }}` in input")
+    open_pos = m.end() - 1
+    close_pos = _find_matching_brace(text, open_pos)
+    return open_pos + 1, close_pos
+
+
+def _split_top_level_blocks(text):
+    """'{A} {B} {C}' (only top-level {...} blocks; whitespace between them
+    is ignored) -> ['A', 'B', 'C']. Used for \\alternative's branches."""
+    blocks = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i].isspace():
+            i += 1
+            continue
+        if text[i] != "{":
+            raise ExcerptError(f"expected '{{' at position {i} inside \\alternative")
+        close = _find_matching_brace(text, i)
+        blocks.append(text[i + 1 : close])
+        i = close + 1
+    return blocks
+
+
+_REPEAT_OPEN_RE = re.compile(r"\\repeat\s+volta\s+(\d+)\s*\{")
+_ALTERNATIVE_OPEN_RE = re.compile(r"\s*\\alternative\s*\{")
+
+
+def unfold_repeats_text(text):
+    """Replace every `\\repeat volta N { BODY } [\\alternative { {A1} {A2} ... }]`
+    with N concatenated copies of BODY, substituting alternative endings in
+    order (reusing the last alternative for any extra passes) — the same
+    semantics as LilyPond's own \\unfoldRepeats, done at the text level so
+    the result can be sliced anywhere, not just at a repeat boundary."""
+    while True:
+        m = _REPEAT_OPEN_RE.search(text)
+        if not m:
+            return text
+        n_repeats = int(m.group(1))
+        body_open = m.end() - 1
+        body_close = _find_matching_brace(text, body_open)
+        body = text[body_open + 1 : body_close]
+
+        consumed_end = body_close + 1
+        alternatives = []
+        alt_m = _ALTERNATIVE_OPEN_RE.match(text, body_close + 1)
+        if alt_m:
+            alt_open = alt_m.end() - 1
+            alt_close = _find_matching_brace(text, alt_open)
+            alternatives = _split_top_level_blocks(text[alt_open + 1 : alt_close])
+            consumed_end = alt_close + 1
+
+        passes = []
+        for i in range(n_repeats):
+            piece = body
+            if alternatives:
+                piece += alternatives[i] if i < len(alternatives) else alternatives[-1]
+            passes.append(piece)
+
+        text = text[: m.start()] + " ".join(passes) + text[consumed_end:]
+
+
+_QUOTED_STRING_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
+_CLEF_ARG_RE = re.compile(r"(?<=\\clef\s)[a-zA-Z]+")
+_KEY_ARG_RE = re.compile(r"(?<=\\key\s)[a-g](?:is|es)*")
+
+
+def _mask_non_musical(text):
+    """Blank out (space-fill, same length/positions so indices still line
+    up with the original text) spans that would otherwise look like note
+    names to the tokenizer below but aren't: quoted strings (markup text),
+    \\clef's clef-name argument (e.g. "bass" starts with a pitch letter),
+    and \\key's tonic-pitch argument. Actual \\command names are already
+    safe without masking — the tokenizer's own lookbehind excludes any
+    letter preceded by another letter or a backslash, which covers a whole
+    command word once its first letter is protected."""
+    chars = list(text)
+    for pat in (_QUOTED_STRING_RE, _CLEF_ARG_RE, _KEY_ARG_RE):
+        for m in pat.finditer(text):
+            for i in range(m.start(), m.end()):
+                chars[i] = " "
+    return "".join(chars)
+
+
+_TUPLET_OPEN_RE = re.compile(r"\\tuplet\s+(\d+)\s*/\s*(\d+)\s*\{")
+_GRACE_OPEN_RE = re.compile(r"\\grace\s*\{")
+_APPOGGIATURA_RE = re.compile(r"\\appoggiatura\s+")
+
+_DURATION_RE = r"\d+\.*(?:\*\d+(?:/\d+)?)?"
+_NOTE_OR_REST = r"(?:[a-g](?:is|es)*[',]*[!?]*|[rRs])"
+_EVENT_RE = re.compile(
+    rf"<[^<>]*>(?P<chord_dur>{_DURATION_RE})?"
+    rf"|(?<![A-Za-z\\]){_NOTE_OR_REST}(?P<note_dur>{_DURATION_RE})?"
+)
+
+
+def _duration_value(token):
+    """'4' -> 1/4, '4.' -> 3/8, '4..' -> 7/16, '1*2/3' -> 2/3, etc — as a
+    fraction of a whole note."""
+    m = re.match(r"(\d+)(\.*)(?:\*(\d+)(?:/(\d+))?)?", token)
+    base = Fraction(1, int(m.group(1)))
+    dots = len(m.group(2))
+    value = base * (2 - Fraction(1, 2**dots)) if dots else base
+    if m.group(3):
+        value *= Fraction(int(m.group(3)), int(m.group(4)) if m.group(4) else 1)
+    return value
+
+
+def _find_scale_and_skip_spans(text):
+    """scale_spans: (start, end, Fraction) for \\tuplet N/M {...} bodies —
+    events starting in [start, end) get their duration multiplied by the
+    Fraction (M/N; nested tuplets multiply). skip_spans: (start, end) for
+    \\grace {...} bodies and single-token \\appoggiatura arguments — events
+    starting there contribute zero duration (they're ornaments, not part
+    of the notated beat) but stay in the text."""
+    scale_spans = []
+    skip_spans = []
+
+    for m in _TUPLET_OPEN_RE.finditer(text):
+        n, d = int(m.group(1)), int(m.group(2))
+        open_pos = m.end() - 1
+        close_pos = _find_matching_brace(text, open_pos)
+        scale_spans.append((open_pos + 1, close_pos, Fraction(d, n)))
+
+    for m in _GRACE_OPEN_RE.finditer(text):
+        open_pos = m.end() - 1
+        close_pos = _find_matching_brace(text, open_pos)
+        skip_spans.append((open_pos + 1, close_pos))
+
+    for m in _APPOGGIATURA_RE.finditer(text):
+        nm = _EVENT_RE.match(text, m.end())
+        if nm:
+            skip_spans.append((nm.start(), nm.end()))
+
+    return scale_spans, skip_spans
+
+
+def compute_event_stream(body_text):
+    """body_text should already be repeat-unfolded. Returns a list of
+    (start, end, duration_in_whole_notes) for every note/chord/rest event,
+    in order, with tuplet scaling applied and grace-note content zeroed."""
+    masked = _mask_non_musical(body_text)
+    scale_spans, skip_spans = _find_scale_and_skip_spans(masked)
+    events = []
+    last_duration = None
+    pos, n = 0, len(masked)
+    while pos < n:
+        m = _EVENT_RE.search(masked, pos)
+        if not m:
+            break
+        start, end = m.start(), m.end()
+        dur_str = m.group("chord_dur") or m.group("note_dur")
+        if dur_str:
+            last_duration = _duration_value(dur_str)
+            duration = last_duration
+        else:
+            if last_duration is None:
+                raise ExcerptError(
+                    f"note/chord/rest with no explicit duration before any duration "
+                    f"was established (near {body_text[max(0, start - 20) : start + 5]!r})"
+                )
+            duration = last_duration
+
+        if any(s <= start < e for s, e in skip_spans):
+            duration = Fraction(0)
+        else:
+            for s, e, scale in scale_spans:
+                if s <= start < e:
+                    duration *= scale
+
+        events.append((start, end, duration))
+        pos = end
+    return events
+
+
+_TEMPO_RE = re.compile(r"\\tempo\s+(\d+)(\.*)\s*=\s*(\d+)")
+
+
+def parse_seconds_per_whole_note(text):
+    matches = _TEMPO_RE.findall(text)
+    if not matches:
+        raise ExcerptError(
+            "no \\tempo marking found (e.g. \\tempo 4 = 72) — auto-excerpt needs "
+            "exactly one constant tempo to convert measures to seconds"
+        )
+    distinct = {(beat, dots, bpm) for beat, dots, bpm in matches}
+    if len(distinct) > 1:
+        raise ExcerptError(
+            "multiple different \\tempo markings found — auto-excerpt only supports "
+            "a single constant tempo for now"
+        )
+    beat_unit, dots, bpm = next(iter(distinct))
+    beat_fraction = _duration_value(beat_unit + dots)
+    seconds_per_beat = 60.0 / int(bpm)
+    return seconds_per_beat / float(beat_fraction)
+
+
+_PARTIAL_RE = re.compile(rf"\\partial\s+({_DURATION_RE})")
+_TIME_RE = re.compile(r"\\time\s+(\d+)\s*/\s*(\d+)")
+_MEASURE_POS_RE = re.compile(
+    r"\\set\s+Timing\.measurePosition\s*=\s*#\(ly:make-moment\s+(-?\d+)(?:/(\d+))?\)"
+)
+
+
+def find_bar_start_pos(body_text, target_bar):
+    """Returns the index into body_text where bar `target_bar` (1-based)
+    begins, by walking the same event stream used for duration-cutting and
+    counting measure boundaries. Honors a leading \\partial (pickup measure
+    — the first measure is shorter than the time signature) and any \\set
+    Timing.measurePosition overrides, which is LilyPond's own device for
+    correcting bar-number bookkeeping around an odd \\alternative ending
+    (e.g. Für Elise's first one) — since we're now doing our own
+    independent bar count instead of relying on LilyPond's engraver, we
+    have to honor the same override or our bar numbers would drift from
+    what LilyPond itself would print."""
+    if target_bar <= 1:
+        return 0
+
+    time_m = _TIME_RE.search(body_text)
+    if not time_m:
+        raise ExcerptError("no \\time signature found — needed to count bars")
+    measure_length = Fraction(int(time_m.group(1)), int(time_m.group(2)))
+
+    masked = _mask_non_musical(body_text)
+    events = compute_event_stream(body_text)
+
+    items = [(e[0], "event", e) for e in events]
+    items += [
+        (m.start(), "partial", _duration_value(m.group(1))) for m in _PARTIAL_RE.finditer(masked)
+    ]
+    for m in _MEASURE_POS_RE.finditer(masked):
+        value = Fraction(int(m.group(1)), int(m.group(2)) if m.group(2) else 1)
+        items.append((m.start(), "position", value))
+    items.sort(key=lambda x: x[0])
+
+    current_bar = 1
+    expected_length = measure_length
+    elapsed = Fraction(0)
+    bar_start_pos = 0
+
+    for _pos, kind, payload in items:
+        if kind == "partial":
+            expected_length = payload
+            continue
+        if kind == "position":
+            elapsed = payload if payload >= 0 else measure_length + payload
+            continue
+        _start, end, duration = payload
+        elapsed += duration
+        while elapsed >= expected_length:
+            elapsed -= expected_length
+            current_bar += 1
+            expected_length = measure_length
+            bar_start_pos = end
+            if current_bar == target_bar:
+                return bar_start_pos
+
+    raise ExcerptError(f"requested bar {target_bar} but this voice only has {current_bar} bar(s)")
+
+
+def _extend_past_open_spans(cut_pos, scale_spans, skip_spans):
+    """If cut_pos lands inside a \\tuplet or \\grace span, push it out past
+    the end of that span instead — cutting the text there would otherwise
+    leave a dangling unclosed \\tuplet/\\grace construct. `e` is the index
+    *of* the span's closing brace (see _find_scale_and_skip_spans), so the
+    push-out target is e + 1 — just past it — not e itself."""
+    changed = True
+    while changed:
+        changed = False
+        for s, e, *_ in list(scale_spans) + [(s, e) for s, e in skip_spans]:
+            if s <= cut_pos < e:
+                cut_pos = e + 1
+                changed = True
+    return cut_pos
+
+
+def find_excerpt_cut(body_text, seconds_per_whole_note, target_seconds):
+    """Returns (cut_pos, actual_seconds): the index into body_text just past
+    the last event needed to cover at least target_seconds, and how many
+    seconds that actually is (may run slightly past target_seconds if the
+    boundary had to be pushed past an open tuplet/grace span)."""
+    events = compute_event_stream(body_text)
+    masked = _mask_non_musical(body_text)
+    scale_spans, skip_spans = _find_scale_and_skip_spans(masked)
+
+    elapsed = Fraction(0)
+    for start, end, duration in events:
+        elapsed += duration
+        seconds = float(elapsed * seconds_per_whole_note)
+        if seconds >= target_seconds:
+            cut_pos = _extend_past_open_spans(end, scale_spans, skip_spans)
+            return cut_pos, seconds
+    total_seconds = float(elapsed * seconds_per_whole_note)
+    raise ExcerptError(
+        f"requested {target_seconds}s but this voice is only {total_seconds:.2f}s long"
+    )
+
+
+def excerpt_voices_text(voices_text, target_seconds, start_bar=1):
+    """Cut upMusic and downMusic down to (at least) target_seconds of music
+    starting at bar `start_bar` (1-based, default the very beginning), at
+    the same elapsed musical time/bar in both voices. Returns the rewritten
+    voices text plus the actual seconds covered (>= target_seconds)."""
+    if start_bar < 1:
+        raise SystemExit("error: excerpt: --start-bar must be 1 or greater")
+    try:
+        seconds_per_whole_note = parse_seconds_per_whole_note(voices_text)
+
+        new_text = voices_text
+        actual_seconds = None
+        for name in ("upMusic", "downMusic"):
+            body_start, body_end = _find_variable_body_span(new_text, name)
+            body = new_text[body_start:body_end]
+            flat_body = unfold_repeats_text(body)
+
+            events = compute_event_stream(flat_body)
+            if not events:
+                raise ExcerptError(f"{name} has no notes/chords/rests to excerpt")
+            header_end = events[0][0]
+            header = flat_body[:header_end]
+
+            if start_bar > 1:
+                masked = _mask_non_musical(flat_body)
+                scale_spans, skip_spans = _find_scale_and_skip_spans(masked)
+                start_pos = find_bar_start_pos(flat_body, start_bar)
+                start_pos = _extend_past_open_spans(start_pos, scale_spans, skip_spans)
+            else:
+                start_pos = 0
+            excerpt_start = max(start_pos, header_end)
+
+            cut_pos, seconds = find_excerpt_cut(
+                flat_body[excerpt_start:], seconds_per_whole_note, target_seconds
+            )
+            actual_seconds = max(actual_seconds or 0, seconds)
+
+            excerpt_body = flat_body[excerpt_start : excerpt_start + cut_pos]
+            new_body = f'\n {header.strip()}\n {excerpt_body.strip()}\n \\bar "|."\n'
+            new_text = new_text[:body_start] + new_body + new_text[body_end:]
+    except ExcerptError as e:
+        raise SystemExit(f"error: excerpt: {e}") from e
+
+    return new_text, actual_seconds
+
+
+def excerpt(input_path, output_path, seconds, *, start_bar=1):
+    voices_path = Path(input_path)
+    if not voices_path.exists():
+        raise SystemExit(f"error: input file not found: {voices_path}")
+    voices_text = voices_path.read_text()
+
+    missing = [name for name, pat in VOICES_REQUIRED_VARS.items() if not pat.search(voices_text)]
+    if missing:
+        raise SystemExit(
+            f"error: {voices_path} is missing required variable(s): {', '.join(missing)}"
+        )
+
+    new_text, actual_seconds = excerpt_voices_text(voices_text, seconds, start_bar=start_bar)
+
+    out_path = Path(output_path)
+    if out_path.resolve() == voices_path.resolve():
+        raise SystemExit("error: refusing to overwrite input file — choose a different -o/--output")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(new_text)
+    bar_note = f", starting at bar {start_bar}" if start_bar > 1 else ""
+    print(f"wrote {out_path} ({actual_seconds:.1f}s{bar_note}, requested >= {seconds}s)")
+    return out_path
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -603,6 +1017,15 @@ def cmd_render(args):
         title=args.title,
         composer=args.composer,
         lilypond_bin=args.lilypond,
+    )
+
+
+def cmd_excerpt(args):
+    excerpt(
+        args.input,
+        args.output or str(Path(args.input).with_name(Path(args.input).stem + ".excerpt.ly")),
+        args.seconds,
+        start_bar=args.start_bar,
     )
 
 
@@ -641,6 +1064,30 @@ def main():
     p_render.add_argument("--composer", default=None, help="score composer credit")
     p_render.add_argument("--lilypond", default="lilypond", help="lilypond binary to invoke")
     p_render.set_defaults(func=cmd_render)
+
+    p_excerpt = sub.add_parser(
+        "excerpt", help="cut a voices.ly file down to (at least) N seconds of music"
+    )
+    p_excerpt.add_argument("input", help="path to a voices .ly file (defines upMusic/downMusic)")
+    p_excerpt.add_argument(
+        "--seconds",
+        type=float,
+        default=60.0,
+        help="minimum duration of the excerpt, in seconds (default: 60)",
+    )
+    p_excerpt.add_argument(
+        "--start-bar",
+        type=int,
+        default=1,
+        help="1-based bar number to start the excerpt at (default: 1, the beginning)",
+    )
+    p_excerpt.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help="output .ly path (default: <input-stem>.excerpt.ly)",
+    )
+    p_excerpt.set_defaults(func=cmd_excerpt)
 
     p_init = sub.add_parser("init", help="scaffold a starter voices.ly + config.json")
     p_init.add_argument("directory", nargs="?", default=".", help="target directory (default: .)")
