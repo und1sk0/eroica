@@ -82,8 +82,16 @@ downMusic = {
 ```
 
 Anything valid inside those braces works — single notes, chords, repeats,
-dynamics, `\clef` changes mid-voice, grace notes, etc. See
-`examples/fur-elise/voices.ly` for a full worked example.
+dynamics, `\clef` changes mid-voice, grace notes, etc. Worked examples:
+
+- `examples/fur-elise/voices.ly` — the first-minute excerpt this project
+  started with.
+- `examples/fur-elise-full/voices.ly` — the complete piece: repeats,
+  tuplets, an ottava run, grace notes/appoggiaturas.
+- `examples/gnossienne-no-3/voices.ly` — genuine two-voice-per-hand
+  polyphony (`\new Voice { \voiceOne ... }` / `\new Voice { \voiceTwo ... }`
+  inside one staff), which is why `NoteNames` needs `\accepts "Voice"`
+  (see `CLAUDE.md`).
 
 ### 3. Render
 
