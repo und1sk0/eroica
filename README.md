@@ -111,6 +111,38 @@ when input and output share a stem (e.g. `voices.ly` -> `voices.pdf`).
 eroica render examples/fur-elise/voices.ly -o /tmp/fur-elise.pdf --title "Für Elise" --composer "Ludwig van Beethoven"
 ```
 
+#### Bigger print / landscape
+
+The default is a portrait letter page at LilyPond's normal staff size, which
+packs 5-6 measures into every row. For a large-print score — wide pages,
+fewer measures per row, everything (staves, noteheads, note names, chord
+labels) scaled up together — use the page-layout flags:
+
+```bash
+eroica render my-piece/voices.ly -o my-piece/score.pdf \
+  --landscape --staff-size 26 --measures-per-line 3 --systems-per-page 3
+```
+
+- `--landscape` / `--portrait` — page orientation.
+- `--paper-size` — LilyPond paper size name (`letter`, `a4`, ...).
+- `--staff-size` — the one knob that actually changes how big things look;
+  everything on the page is sized relative to it. 20 is LilyPond's default,
+  26 is noticeably larger, 30+ is very large print.
+- `--measures-per-line` — exactly N measures per row instead of as many as
+  fit. A `\partial` pickup rides along on the first row rather than being
+  stranded on a row of its own.
+- `--systems-per-page` — exactly N rows per page. Note that this *forces*
+  the count: if N rows don't actually fit, LilyPond packs them in anyway and
+  the bottom row's note names run off the page edge, silently — no warning.
+  Heavily annotated pieces (a chord circle over most beats, in both hands)
+  make tall rows, so on a short landscape page 2 is often the honest maximum.
+  Leave the flag off and LilyPond fits as many as it can.
+
+Each flag overrides the matching `page` setting in config.json, so a layout
+you like can live there permanently (see below) and still be overridden for a
+one-off render. `0` means "let LilyPond decide" for the two count flags —
+it's how you switch a config.json setting back off from the command line.
+
 ### 4. Excerpt by duration (optional)
 
 ```bash
@@ -133,7 +165,14 @@ than guess. Render the result normally with `eroica render`.
   "colors": { "enabled": true, "colordict": { "C": "#4f8e10", "...": "..." } },
   "chordStagger": { "enabled": true, "step": 0.6 },
   "chordQualityCircle": { "enabled": true },
-  "chordNoteStack": { "enabled": true }
+  "chordNoteStack": { "enabled": true },
+  "page": {
+    "orientation": "portrait",
+    "paperSize": "letter",
+    "staffSize": 20,
+    "systemsPerPage": null,
+    "measuresPerLine": null
+  }
 }
 ```
 
@@ -157,6 +196,13 @@ than guess. Render the result normally with `eroica render`.
   major/minor/dim/aug/sus/7th shape, circles the guessed name (e.g. Ⓒ, Ⓐm)
   above the staff. Ambiguous chords (bare 5ths, 2nds, non-tertian clusters)
   are deliberately left unlabeled rather than guessing.
+- **`page`** — page geometry and visual scale, the config.json form of the
+  render flags above. `orientation` is `"portrait"` or `"landscape"`;
+  `paperSize` is any LilyPond paper size name; `staffSize` is the global
+  staff size everything else scales with (LilyPond's default is 20);
+  `systemsPerPage` and `measuresPerLine` pin the number of staff rows per
+  page and measures per row, or are `null` to let LilyPond fit as many as it
+  can.
 - **`chordNoteStack`** — replaces the note-name row's slash-joined chord
   spelling ("f/g/bb") with a circled top-down stack of the same letters, for
   any 2+ note chord regardless of whether it has a guessable quality.

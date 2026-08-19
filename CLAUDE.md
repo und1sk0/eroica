@@ -56,6 +56,49 @@ Mutopia `.ly` file is never usable as-is. Adapting one means:
   were unaffected, which is why it went unnoticed. Fixed in
   `fix/color-polyphonic-voices`.
 
+## Page layout (landscape / large print, `page` config section)
+
+Three separate LilyPond mechanisms, each with a trap:
+
+- **Landscape** is emitted as the paper-size *name*
+  (`#(set-default-paper-size "letterlandscape")`), never as the symbol form
+  `#(set-default-paper-size "letter" 'landscape)`. The symbol form keeps a
+  portrait MediaBox (612x792) and rotates the content inside it, so viewers
+  show the music sideways on a portrait page; the name form emits a real
+  landscape page (792x612) with upright content. Verified by reading the
+  MediaBox out of both PDFs.
+- **Scale** is `#(set-global-staff-size N)`, and it is the only knob that
+  makes things bigger — noteheads, the NoteNames row, chord-quality circles,
+  and the legend are all sized relative to it, so nothing needs to be scaled
+  separately. Both settings are top-level and must precede the `\paper`
+  block (see `build_page_setup`).
+- **Fixed measures per line** needs *two* cooperating pieces, and is silently
+  wrong with only one: the `break-every-n-bars` engraver forces a break at
+  every Nth measure start, and `\override
+  NonMusicalPaperColumn.line-break-permission = ##f` forbids breaks anywhere
+  else. Without the override, LilyPond still breaks wherever it likes and "3
+  per line" comes out as "at most 3" (Für Elise rendered a lone 1-measure
+  row). The engraver counts *bar starts* it has seen rather than testing
+  `currentBarNumber mod n`, because a piece can renumber mid-measure via
+  `\set Timing.measurePosition` (Für Elise does, around its first
+  alternative ending), and it deliberately never forces at the first bar
+  start — otherwise a `\partial` pickup gets stranded alone on row one.
+
+`systems-per-page` is a hard override, not a hint: LilyPond will put N
+systems on a page whether or not they fit, and the overflow is silent — no
+warning, exit 0, and the bottom NoteNames row simply gets cut off by the page
+edge. Landscape makes this easy to hit, since the page is ~200pt shorter
+while an annotated system (staff + note-name row per hand, plus chord circles
+above and stacked-chord circles below) is exactly as tall as before. Clair de
+Lune at staff size 26 needed 2 systems/page to look right and clipped 8 of 18
+pages doing it; staff size 20 fits 2/page with ~15-30pt to spare. Check for
+this by rasterizing pages and measuring where the ink stops (a bottom margin
+of 0 means clipped) — eyeballing page 1 won't catch it, since the pages that
+clip are the annotation-dense ones in the middle.
+
+Defaults reproduce the old output exactly (portrait letter, staff size 20,
+automatic breaks): a no-flag render still emits a byte-identical score body.
+
 ## Excerpt/duration engine (eroica.py, "Auto-excerpt by duration" section)
 
 - Everything is computed on **repeat-unfolded, text-sliced** music — the

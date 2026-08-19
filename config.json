@@ -25,5 +25,12 @@
   },
   "chordNoteStack": {
     "enabled": true
+  },
+  "page": {
+    "orientation": "portrait",
+    "paperSize": "letter",
+    "staffSize": 20,
+    "systemsPerPage": null,
+    "measuresPerLine": null
   }
 }
