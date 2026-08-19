@@ -363,11 +363,15 @@ _NOTE_STACK_TEMPLATE = r"""
 % circled, top-down stack of the same letters (no slashes). Order is
 % preserved exactly as written in the chord. Single notes are untouched.
 % Reuses pitch-root-name directly — same capitalized letter + properly
-% small accidental as everywhere else note names appear.
+% small accidental as everywhere else note names appear. Bolded to match the
+% chord-quality circles: at fontsize -3, stacked two or three letters deep
+% inside a circle, the normal weight is thin enough to be a real strain to
+% read on a printed page.
 #(define (stacked-chord-markup pitches)
    (make-circle-markup
-     (make-fontsize-markup -3
-       (make-center-column-markup (map pitch-root-name pitches)))))
+     (make-bold-markup
+       (make-fontsize-markup -3
+         (make-center-column-markup (map pitch-root-name pitches))))))
 
 #(define (add-stacked-chord-label m)
    (if (music-is-of-type? m 'event-chord)
