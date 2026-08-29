@@ -452,9 +452,17 @@ _BREAK_ENGRAVER_TEMPLATE = r"""
      (make-engraver
        (acknowledgers
          ((paper-column-interface engraver grob source-engraver)
-           (let ((bar (ly:context-property ctx 'currentBarNumber)))
+           (let ((bar (ly:context-property ctx 'currentBarNumber))
+                 (pos (ly:context-property ctx 'measurePosition)))
+             ;; Only the main part of the moment is tested for zero. A grace
+             ;; note before a barline sits at the same main position with a
+             ;; negative grace part, so comparing the whole moment to
+             ;; ZERO-MOMENT skips every measure that opens with a grace — in
+             ;; Satie's Gnossienne No. 1, where most do, "5 measures per row"
+             ;; came out as 25. Forcing at this column also puts the break
+             ;; before the grace, where it belongs.
              (if (and (eq? #t (ly:grob-property grob 'non-musical))
-                      (equal? ZERO-MOMENT (ly:context-property ctx 'measurePosition))
+                      (zero? (ly:moment-main pos))
                       (not (equal? bar last-bar)))
                  (begin
                    (set! last-bar bar)

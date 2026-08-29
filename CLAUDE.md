@@ -83,6 +83,11 @@ Three separate LilyPond mechanisms, each with a trap:
   `\set Timing.measurePosition` (Für Elise does, around its first
   alternative ending), and it deliberately never forces at the first bar
   start — otherwise a `\partial` pickup gets stranded alone on row one.
+  A measure start is detected as `(zero? (ly:moment-main pos))`, **not**
+  `(equal? ZERO-MOMENT pos)`: a grace note before a barline shares the main
+  position and carries a negative grace part, so the whole-moment test skips
+  every measure that opens with a grace. Gnossienne No. 1, where most of them
+  do, rendered "5 measures per row" as 25.
 
 `systems-per-page` is a hard override, not a hint: LilyPond will put N
 systems on a page whether or not they fit, and the overflow is silent — no
