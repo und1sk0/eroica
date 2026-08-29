@@ -56,6 +56,18 @@ Mutopia `.ly` file is never usable as-is. Adapting one means:
   were unaffected, which is why it went unnoticed. Fixed in
   `fix/color-polyphonic-voices`.
 
+## The note-name row replays the music
+
+Both the Staff and its NoteNames row are handed the *same* `upMusic` /
+`downMusic`, so anything the voices.ly attaches to a note is engraved twice —
+dynamics, hairpins, articulations, `\ottava` brackets, and text directions
+like Für Elise's `\pp` or Clair de Lune's "con sordina", which printed once
+under the staff and again inside the note-name row. `build_preamble` kills
+them there with `#f` stencils (not transparency: an invisible markup still
+reserves height and shoves the staves apart). The chord-quality circles are
+safe because `\chordNames` is only ever applied to the Staff copy of the
+music, never to the NoteNames copy.
+
 ## Page layout (landscape / large print, `page` config section)
 
 Three separate LilyPond mechanisms, each with a trap:

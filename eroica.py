@@ -546,6 +546,20 @@ def build_preamble(config):
         r"  \override Rest.transparent = ##t",
         r"  \override MultiMeasureRest.transparent = ##t",
         r"  \override Dots.transparent = ##t",
+        # Everything the voices.ly attaches to its notes — dynamics, hairpins,
+        # articulations, performance directions like "con sordina", ottava
+        # brackets — is engraved a second time here, since the note-name row
+        # replays the same music. Suppressed with a #f stencil rather than
+        # transparency so the duplicate reserves no vertical space either: a
+        # long text markup in the row shoved the staves apart even when it was
+        # invisible.
+        r"  \override TextScript.stencil = ##f",
+        r"  \override TextSpanner.stencil = ##f",
+        r"  \override DynamicText.stencil = ##f",
+        r"  \override DynamicTextSpanner.stencil = ##f",
+        r"  \override Hairpin.stencil = ##f",
+        r"  \override Script.stencil = ##f",
+        r"  \override OttavaBracket.stencil = ##f",
         # Multi-voice moments (two voices merged into one note-name column,
         # e.g. a melody note + a chord in the other voice) otherwise inherit
         # a noticeably larger ambient font-size than single-voice moments do,
