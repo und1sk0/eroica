@@ -131,6 +131,10 @@ eroica render my-piece/voices.ly -o my-piece/score.pdf \
 - `--measures-per-line` — exactly N measures per row instead of as many as
   fit. A `\partial` pickup rides along on the first row rather than being
   stranded on a row of its own.
+- `--page-numbers` / `--no-page-numbers` — page numbers are on by default,
+  on every page including the first, always in the same top corner (LilyPond
+  itself skips page 1 and alternates corners for facing pages, which is the
+  convention for a bound book rather than a stack of loose practice sheets).
 - `--systems-per-page` — exactly N rows per page. Note that this *forces*
   the count: if N rows don't actually fit, LilyPond packs them in anyway and
   the bottom row's note names run off the page edge, silently — no warning.
@@ -171,7 +175,8 @@ than guess. Render the result normally with `eroica render`.
     "paperSize": "letter",
     "staffSize": 20,
     "systemsPerPage": null,
-    "measuresPerLine": null
+    "measuresPerLine": null,
+    "pageNumbers": true
   }
 }
 ```
@@ -202,7 +207,8 @@ than guess. Render the result normally with `eroica render`.
   staff size everything else scales with (LilyPond's default is 20);
   `systemsPerPage` and `measuresPerLine` pin the number of staff rows per
   page and measures per row, or are `null` to let LilyPond fit as many as it
-  can.
+  can; `pageNumbers` numbers every page (including the first) in a fixed
+  corner, and is on by default.
 - **`chordNoteStack`** — replaces the note-name row's slash-joined chord
   spelling ("f/g/bb") with a circled top-down stack of the same letters, for
   any 2+ note chord regardless of whether it has a guessable quality.

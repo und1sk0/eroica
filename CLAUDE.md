@@ -96,8 +96,18 @@ this by rasterizing pages and measuring where the ink stops (a bottom margin
 of 0 means clipped) — eyeballing page 1 won't catch it, since the pages that
 clip are the annotation-dense ones in the middle.
 
-Defaults reproduce the old output exactly (portrait letter, staff size 20,
-automatic breaks): a no-flag render still emits a byte-identical score body.
+Page numbers (`page.pageNumbers`, on by default) depart from LilyPond twice,
+both times because these print as loose single-sided sheets rather than a
+bound book: `print-first-page-number` numbers page 1, and `evenHeaderMarkup`
+is redefined as a copy of the default `oddHeaderMarkup` so the number stays in
+the same corner instead of alternating for facing pages. That copy keeps
+`\if \should-print-page-number`, so `print-page-number` still governs it —
+drop that and `--no-page-numbers` would silently stop working on even pages.
+
+Geometry defaults reproduce the old output exactly (portrait letter, staff
+size 20, automatic breaks) — a no-flag render emits a byte-identical score
+body. The `\paper` block is the one intended difference: it carries the
+page-number settings.
 
 ## Excerpt/duration engine (eroica.py, "Auto-excerpt by duration" section)
 

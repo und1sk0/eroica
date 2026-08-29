@@ -74,6 +74,7 @@ DEFAULT_CONFIG = {
         "staffSize": 20,
         "systemsPerPage": None,
         "measuresPerLine": None,
+        "pageNumbers": True,
     },
 }
 
@@ -195,6 +196,9 @@ def _validate_page(page):
     size = page["staffSize"]
     if isinstance(size, bool) or not isinstance(size, (int, float)) or size <= 0:
         raise ConfigError("page.staffSize must be a positive number (LilyPond default: 20)")
+
+    if not isinstance(page["pageNumbers"], bool):
+        raise ConfigError("page.pageNumbers must be true or false")
 
     for key in ("systemsPerPage", "measuresPerLine"):
         value = page[key]
@@ -615,9 +619,33 @@ def build_page_setup(config):
 def build_score_block(config):
     page = config["page"]
 
-    paper_extra = ""
+    paper_lines = []
     if page["systemsPerPage"] is not None:
-        paper_extra = f"  systems-per-page = #{page['systemsPerPage']}\n"
+        paper_lines.append(f"  systems-per-page = #{page['systemsPerPage']}")
+    if page["pageNumbers"]:
+        # Two departures from LilyPond's defaults, both for the same reason —
+        # these come out of the printer as a stack of loose single-sided sheets
+        # that get shuffled on a music stand, not as a bound double-sided book.
+        # LilyPond skips the number on page 1 (the title page convention) and
+        # alternates it left/right for facing pages; here every page is numbered
+        # and the number stays in the same corner, so it's findable at a glance.
+        # evenHeaderMarkup is the default oddHeaderMarkup verbatim (see
+        # LilyPond's titling-init.ly) — keeping \should-print-page-number means
+        # the print-page-number settings above still govern it.
+        paper_lines.append("  print-page-number = ##t")
+        paper_lines.append("  print-first-page-number = ##t")
+        paper_lines.append("  evenHeaderMarkup = \\markup \\fill-line {")
+        paper_lines.append('    ""')
+        paper_lines.append(
+            "    \\unless \\on-first-page-of-part \\fromproperty #'header:instrument"
+        )
+        paper_lines.append(
+            "    \\if \\should-print-page-number \\fromproperty #'page:page-number-string"
+        )
+        paper_lines.append("  }")
+    else:
+        paper_lines.append("  print-page-number = ##f")
+    paper_extra = "".join(f"{line}\n" for line in paper_lines)
 
     layout_extra = " "
     if page["measuresPerLine"] is not None:
@@ -1170,6 +1198,8 @@ def cmd_render(args):
         page_overrides["systemsPerPage"] = args.systems_per_page or None
     if args.measures_per_line is not None:
         page_overrides["measuresPerLine"] = args.measures_per_line or None
+    if args.page_numbers is not None:
+        page_overrides["pageNumbers"] = args.page_numbers
 
     render(
         args.input,
@@ -1254,6 +1284,21 @@ def main():
         type=int,
         default=None,
         help="fixed number of staff rows per page (0 = let LilyPond decide)",
+    )
+    numbers = layout.add_mutually_exclusive_group()
+    numbers.add_argument(
+        "--page-numbers",
+        dest="page_numbers",
+        action="store_true",
+        default=None,
+        help="print a page number on every page, including the first (default)",
+    )
+    numbers.add_argument(
+        "--no-page-numbers",
+        dest="page_numbers",
+        action="store_false",
+        default=None,
+        help="print no page numbers at all",
     )
     layout.add_argument(
         "--measures-per-line",

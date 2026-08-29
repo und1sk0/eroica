@@ -31,6 +31,7 @@
     "paperSize": "letter",
     "staffSize": 20,
     "systemsPerPage": null,
-    "measuresPerLine": null
+    "measuresPerLine": null,
+    "pageNumbers": true
   }
 }
