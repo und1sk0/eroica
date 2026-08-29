@@ -68,12 +68,17 @@ DEFAULT_CONFIG = {
     "chordStagger": {"enabled": True, "step": 0.6},
     "chordQualityCircle": {"enabled": True},
     "chordNoteStack": {"enabled": True},
+    # Large-print defaults: a wide page at a bigger staff size, five measures
+    # to a row and two rows to a page. Tuned on Satie's Gymnopédie No. 1 — the
+    # right number of measures per row is a property of how densely the piece
+    # is written, so a piece with more notes per bar (Debussy's Clair de Lune,
+    # say) wants a lower `measuresPerLine` and often `systemsPerPage: null`.
     "page": {
-        "orientation": "portrait",
+        "orientation": "landscape",
         "paperSize": "letter",
-        "staffSize": 20,
-        "systemsPerPage": None,
-        "measuresPerLine": None,
+        "staffSize": 24,
+        "systemsPerPage": 2,
+        "measuresPerLine": 5,
         "pageNumbers": True,
     },
 }
@@ -135,7 +140,8 @@ def load_config(path, *, page_overrides=None):
     """Load config.json merged over DEFAULT_CONFIG. path=None -> pure defaults.
 
     page_overrides (from `eroica render`'s layout flags) win over both, so a
-    one-off `--landscape --staff-size 26` doesn't require editing config.json.
+    one-off `--staff-size 20 --measures-per-line 3` doesn't require editing
+    config.json.
     """
     if path is None:
         user_config = {}
@@ -195,7 +201,9 @@ def _validate_page(page):
 
     size = page["staffSize"]
     if isinstance(size, bool) or not isinstance(size, (int, float)) or size <= 0:
-        raise ConfigError("page.staffSize must be a positive number (LilyPond default: 20)")
+        raise ConfigError(
+            "page.staffSize must be a positive number (eroica default: 24, LilyPond's own: 20)"
+        )
 
     if not isinstance(page["pageNumbers"], bool):
         raise ConfigError("page.pageNumbers must be true or false")
@@ -598,6 +606,9 @@ def build_header(title, composer):
 def build_page_setup(config):
     r"""Top-level paper-size/staff-size settings — must precede the \paper block.
 
+    Both default to large print (landscape letter, staff size 24) rather than
+    LilyPond's portrait/20, since these scores are read off a music stand.
+
     Landscape is requested as the "<size>landscape" paper name rather than
     LilyPond's `'landscape` symbol argument: the symbol keeps a portrait
     MediaBox and rotates the content inside it (which viewers show sideways),
@@ -683,6 +694,13 @@ def render(
     lilypond_bin="lilypond",
     page_overrides=None,
 ):
+    """Render a voices .ly file to an annotated PDF, writing the combined .ly beside it.
+
+    page_overrides is the `page` section of config.json partially overridden —
+    see cmd_render. Layout defaults to large print; how many measures fit a row
+    depends on how densely the piece is written, so a dense piece may need a
+    lower measuresPerLine or `systemsPerPage: null`.
+    """
     voices_path = Path(input_path)
     if not voices_path.exists():
         raise SystemExit(f"error: input file not found: {voices_path}")
@@ -1265,10 +1283,14 @@ def main():
         dest="orientation",
         action="store_const",
         const="landscape",
-        help="wide pages: fewer, larger measures per row",
+        help="wide pages: fewer, larger measures per row (default)",
     )
     orientation.add_argument(
-        "--portrait", dest="orientation", action="store_const", const="portrait", help="tall pages"
+        "--portrait",
+        dest="orientation",
+        action="store_const",
+        const="portrait",
+        help="tall pages, LilyPond's usual shape",
     )
     layout.add_argument(
         "--paper-size", default=None, help="LilyPond paper size name (e.g. letter, a4)"
@@ -1277,13 +1299,13 @@ def main():
         "--staff-size",
         type=float,
         default=None,
-        help="global staff size — scales staves, noteheads, note names, and text (default: 20)",
+        help="global staff size — scales staves, noteheads, note names, and text (default: 24)",
     )
     layout.add_argument(
         "--systems-per-page",
         type=int,
         default=None,
-        help="fixed number of staff rows per page (0 = let LilyPond decide)",
+        help="fixed number of staff rows per page (default: 2; 0 = let LilyPond decide)",
     )
     numbers = layout.add_mutually_exclusive_group()
     numbers.add_argument(
@@ -1304,7 +1326,7 @@ def main():
         "--measures-per-line",
         type=int,
         default=None,
-        help="fixed number of measures per row (0 = let LilyPond decide)",
+        help="fixed number of measures per row (default: 5; 0 = let LilyPond decide)",
     )
     p_render.set_defaults(func=cmd_render)
 

@@ -27,11 +27,11 @@
     "enabled": true
   },
   "page": {
-    "orientation": "portrait",
+    "orientation": "landscape",
     "paperSize": "letter",
-    "staffSize": 20,
-    "systemsPerPage": null,
-    "measuresPerLine": null,
+    "staffSize": 24,
+    "systemsPerPage": 2,
+    "measuresPerLine": 5,
     "pageNumbers": true
   }
 }

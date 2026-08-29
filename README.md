@@ -111,41 +111,49 @@ when input and output share a stem (e.g. `voices.ly` -> `voices.pdf`).
 eroica render examples/fur-elise/voices.ly -o /tmp/fur-elise.pdf --title "Für Elise" --composer "Ludwig van Beethoven"
 ```
 
-#### Bigger print / landscape
+#### Page layout
 
-The default is a portrait letter page at LilyPond's normal staff size, which
-packs 5-6 measures into every row. For a large-print score — wide pages,
-fewer measures per row, everything (staves, noteheads, note names, chord
-labels) scaled up together — use the page-layout flags:
+Out of the box a render is large print: a landscape letter page at staff size
+24, five measures to a row and two rows to a page, with every page numbered.
+Those are the defaults because the point of an eroica score is to be read off
+a music stand — the annotations (note names under every note, chord circles
+above and below) need room, and a portrait page at LilyPond's normal staff
+size packs 5-6 dense measures into every row.
+
+Every part of that is adjustable, per render or in config.json:
 
 ```bash
 eroica render my-piece/voices.ly -o my-piece/score.pdf \
-  --landscape --staff-size 26 --measures-per-line 3 --systems-per-page 3
+  --measures-per-line 3 --staff-size 20 --systems-per-page 0
 ```
 
-- `--landscape` / `--portrait` — page orientation.
+- `--landscape` / `--portrait` — page orientation. Landscape is the default;
+  `--portrait` gives LilyPond's usual page shape.
 - `--paper-size` — LilyPond paper size name (`letter`, `a4`, ...).
 - `--staff-size` — the one knob that actually changes how big things look;
-  everything on the page is sized relative to it. 20 is LilyPond's default,
-  26 is noticeably larger, 30+ is very large print.
-- `--measures-per-line` — exactly N measures per row instead of as many as
-  fit. A `\partial` pickup rides along on the first row rather than being
-  stranded on a row of its own.
+  everything on the page is sized relative to it. Default 24; LilyPond's own
+  default is 20, and 30+ is very large print.
+- `--measures-per-line` — exactly N measures per row (default 5) instead of
+  as many as fit. A `\partial` pickup rides along on the first row rather
+  than being stranded on a row of its own.
+- `--systems-per-page` — exactly N rows per page (default 2).
 - `--page-numbers` / `--no-page-numbers` — page numbers are on by default,
   on every page including the first, always in the same top corner (LilyPond
   itself skips page 1 and alternates corners for facing pages, which is the
   convention for a bound book rather than a stack of loose practice sheets).
-- `--systems-per-page` — exactly N rows per page. Note that this *forces*
-  the count: if N rows don't actually fit, LilyPond packs them in anyway and
-  the bottom row's note names run off the page edge, silently — no warning.
-  Heavily annotated pieces (a chord circle over most beats, in both hands)
-  make tall rows, so on a short landscape page 2 is often the honest maximum.
-  Leave the flag off and LilyPond fits as many as it can.
 
-Each flag overrides the matching `page` setting in config.json, so a layout
-you like can live there permanently (see below) and still be overridden for a
-one-off render. `0` means "let LilyPond decide" for the two count flags —
-it's how you switch a config.json setting back off from the command line.
+`0` means "let LilyPond decide" for the two count flags — it's how you switch
+a config.json setting back off from the command line.
+
+**The right numbers depend on the piece.** The defaults are tuned on music
+written like Satie's Gymnopédie No. 1 — a handful of events per bar. A
+densely written piece (Debussy's Clair de Lune, with a chord circle over most
+beats in both hands) makes much taller rows, and two of them will not fit a
+landscape page. `--systems-per-page` *forces* the count: when N rows don't
+fit, LilyPond packs them in anyway and the bottom row's note names run off
+the page edge, silently — no warning, and it renders successfully. If your
+score looks cut off at the bottom, pass `--systems-per-page 0` to let
+LilyPond fit what it can, or drop `--staff-size`.
 
 ### 4. Excerpt by duration (optional)
 
@@ -171,11 +179,11 @@ than guess. Render the result normally with `eroica render`.
   "chordQualityCircle": { "enabled": true },
   "chordNoteStack": { "enabled": true },
   "page": {
-    "orientation": "portrait",
+    "orientation": "landscape",
     "paperSize": "letter",
-    "staffSize": 20,
-    "systemsPerPage": null,
-    "measuresPerLine": null,
+    "staffSize": 24,
+    "systemsPerPage": 2,
+    "measuresPerLine": 5,
     "pageNumbers": true
   }
 }
@@ -206,9 +214,11 @@ than guess. Render the result normally with `eroica render`.
   `paperSize` is any LilyPond paper size name; `staffSize` is the global
   staff size everything else scales with (LilyPond's default is 20);
   `systemsPerPage` and `measuresPerLine` pin the number of staff rows per
-  page and measures per row, or are `null` to let LilyPond fit as many as it
-  can; `pageNumbers` numbers every page (including the first) in a fixed
-  corner, and is on by default.
+  page and measures per row (2 and 5), or are `null` to let LilyPond fit as
+  many as it can; `pageNumbers` numbers every page (including the first) in a
+  fixed corner, and is on by default. Defaults: landscape letter, staff size
+  24 — see the layout notes above, including why a densely written piece
+  wants different numbers.
 - **`chordNoteStack`** — replaces the note-name row's slash-joined chord
   spelling ("f/g/bb") with a circled top-down stack of the same letters, for
   any 2+ note chord regardless of whether it has a guessable quality.

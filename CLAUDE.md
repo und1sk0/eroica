@@ -104,10 +104,17 @@ the same corner instead of alternating for facing pages. That copy keeps
 `\if \should-print-page-number`, so `print-page-number` still governs it —
 drop that and `--no-page-numbers` would silently stop working on even pages.
 
-Geometry defaults reproduce the old output exactly (portrait letter, staff
-size 20, automatic breaks) — a no-flag render emits a byte-identical score
-body. The `\paper` block is the one intended difference: it carries the
-page-number settings.
+The shipped defaults are large print, not LilyPond's: landscape letter, staff
+size 24, `measuresPerLine` 5, `systemsPerPage` 2. Those numbers were tuned on
+Satie's Gymnopédie No. 1 (a few events per bar) and are **not** universal —
+measures per row is really a function of how densely the piece is written.
+Clair de Lune under the stock defaults clips 4 of 8 pages, since two of its
+annotation-dense rows do not fit a landscape page; it wants
+`--systems-per-page 0` (15 clean pages) or `--measures-per-line 3
+--staff-size 20` (13 clean pages, tighter). Setting `page` back to portrait /
+20 / null / null reproduces pre-feature geometry exactly, byte-identical
+score body — only the `\paper` block differs, carrying the page-number
+settings.
 
 ## Excerpt/duration engine (eroica.py, "Auto-excerpt by duration" section)
 
