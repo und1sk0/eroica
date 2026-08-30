@@ -68,7 +68,22 @@ DEFAULT_CONFIG = {
     "chordStagger": {"enabled": True, "step": 0.6},
     "chordQualityCircle": {"enabled": True},
     "chordNoteStack": {"enabled": True},
+    # Large-print defaults: a wide page at a bigger staff size, five measures
+    # to a row and two rows to a page. Tuned on Satie's Gymnopédie No. 1 — the
+    # right number of measures per row is a property of how densely the piece
+    # is written, so a piece with more notes per bar (Debussy's Clair de Lune,
+    # say) wants a lower `measuresPerLine` and often `systemsPerPage: null`.
+    "page": {
+        "orientation": "landscape",
+        "paperSize": "letter",
+        "staffSize": 24,
+        "systemsPerPage": 2,
+        "measuresPerLine": 5,
+        "pageNumbers": True,
+    },
 }
+
+ORIENTATIONS = ("portrait", "landscape")
 
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -121,8 +136,13 @@ def _normalize_colordict_keys(colordict):
     return normalized
 
 
-def load_config(path):
-    """Load config.json merged over DEFAULT_CONFIG. path=None -> pure defaults."""
+def load_config(path, *, page_overrides=None):
+    """Load config.json merged over DEFAULT_CONFIG. path=None -> pure defaults.
+
+    page_overrides (from `eroica render`'s layout flags) win over both, so a
+    one-off `--staff-size 20 --measures-per-line 3` doesn't require editing
+    config.json.
+    """
     if path is None:
         user_config = {}
     else:
@@ -144,6 +164,8 @@ def load_config(path):
         )
 
     config = _deep_merge(DEFAULT_CONFIG, user_config)
+    if page_overrides:
+        config = _deep_merge(config, {"page": page_overrides})
 
     if not isinstance(config["colors"]["enabled"], bool):
         raise ConfigError("colors.enabled must be true or false")
@@ -158,7 +180,40 @@ def load_config(path):
     if isinstance(step, bool) or not isinstance(step, (int, float)):
         raise ConfigError("chordStagger.step must be a number")
 
+    _validate_page(config["page"])
+
     return config
+
+
+def _validate_page(page):
+    """Validate the `page` section (paper orientation/size and visual scale)."""
+    if not isinstance(page, dict):
+        raise ConfigError("page must be an object")
+
+    if page["orientation"] not in ORIENTATIONS:
+        raise ConfigError(
+            f"page.orientation must be one of {', '.join(ORIENTATIONS)}, "
+            f"got {page['orientation']!r}"
+        )
+
+    if not isinstance(page["paperSize"], str) or not page["paperSize"].strip():
+        raise ConfigError("page.paperSize must be a non-empty LilyPond paper size name")
+
+    size = page["staffSize"]
+    if isinstance(size, bool) or not isinstance(size, (int, float)) or size <= 0:
+        raise ConfigError(
+            "page.staffSize must be a positive number (eroica default: 24, LilyPond's own: 20)"
+        )
+
+    if not isinstance(page["pageNumbers"], bool):
+        raise ConfigError("page.pageNumbers must be true or false")
+
+    for key in ("systemsPerPage", "measuresPerLine"):
+        value = page[key]
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ConfigError(f"page.{key} must be a positive whole number, or null for automatic")
 
 
 # --------------------------------------------------------------------------
@@ -320,11 +375,15 @@ _NOTE_STACK_TEMPLATE = r"""
 % circled, top-down stack of the same letters (no slashes). Order is
 % preserved exactly as written in the chord. Single notes are untouched.
 % Reuses pitch-root-name directly — same capitalized letter + properly
-% small accidental as everywhere else note names appear.
+% small accidental as everywhere else note names appear. Bolded to match the
+% chord-quality circles: at fontsize -3, stacked two or three letters deep
+% inside a circle, the normal weight is thin enough to be a real strain to
+% read on a printed page.
 #(define (stacked-chord-markup pitches)
    (make-circle-markup
-     (make-fontsize-markup -3
-       (make-center-column-markup (map pitch-root-name pitches)))))
+     (make-bold-markup
+       (make-fontsize-markup -3
+         (make-center-column-markup (map pitch-root-name pitches))))))
 
 #(define (add-stacked-chord-label m)
    (if (music-is-of-type? m 'event-chord)
@@ -354,7 +413,7 @@ _SCORE_BLOCK = r"""
   top-margin = 8\mm
   bottom-margin = 9\mm
   ragged-last-bottom = ##f
-}
+__PAPER_EXTRA__}
 
 \score {
   \new PianoStaff
@@ -368,8 +427,48 @@ _SCORE_BLOCK = r"""
       \colorNoteNames \chordNoteNameStack \unfoldRepeats \downMusic
     }
   >>
-  \layout { }
+  \layout {__LAYOUT_EXTRA__}
 }
+"""
+
+# Fixed measures per line. Two halves that only work together: the engraver
+# marks the start of every Nth measure as a forced break, and the
+# line-break-permission override forbids breaks anywhere else — without the
+# override LilyPond is still free to break at any other barline it likes, so
+# "3 measures per line" silently comes out as "at most 3".
+#
+# Measure starts are detected as "a non-musical column at measure position 0
+# whose bar number differs from the last one we counted", not as
+# `currentBarNumber mod n`: a piece may renumber mid-measure (Fur Elise's
+# `\set Timing.measurePosition` fixup around its first alternative ending
+# does exactly that), and counting bar *starts* stays right through it.
+# The very first measure start is never forced — the line already starts
+# there, and forcing it would strand a `\partial` pickup alone on line one.
+_BREAK_ENGRAVER_TEMPLATE = r"""
+% --- Force a line break at the start of every Nth measure.
+#(define ((break-every-n-bars n) ctx)
+   (let ((last-bar #f)
+         (bars-seen 0))
+     (make-engraver
+       (acknowledgers
+         ((paper-column-interface engraver grob source-engraver)
+           (let ((bar (ly:context-property ctx 'currentBarNumber))
+                 (pos (ly:context-property ctx 'measurePosition)))
+             ;; Only the main part of the moment is tested for zero. A grace
+             ;; note before a barline sits at the same main position with a
+             ;; negative grace part, so comparing the whole moment to
+             ;; ZERO-MOMENT skips every measure that opens with a grace — in
+             ;; Satie's Gnossienne No. 1, where most do, "5 measures per row"
+             ;; came out as 25. Forcing at this column also puts the break
+             ;; before the grace, where it belongs.
+             (if (and (eq? #t (ly:grob-property grob 'non-musical))
+                      (zero? (ly:moment-main pos))
+                      (not (equal? bar last-bar)))
+                 (begin
+                   (set! last-bar bar)
+                   (if (and (> bars-seen 0) (= 0 (modulo bars-seen n)))
+                       (ly:grob-set-property! grob 'line-break-permission 'force))
+                   (set! bars-seen (1+ bars-seen))))))))))
 """
 
 _LEGEND_TEMPLATE = r"""
@@ -447,6 +546,20 @@ def build_preamble(config):
         r"  \override Rest.transparent = ##t",
         r"  \override MultiMeasureRest.transparent = ##t",
         r"  \override Dots.transparent = ##t",
+        # Everything the voices.ly attaches to its notes — dynamics, hairpins,
+        # articulations, performance directions like "con sordina", ottava
+        # brackets — is engraved a second time here, since the note-name row
+        # replays the same music. Suppressed with a #f stencil rather than
+        # transparency so the duplicate reserves no vertical space either: a
+        # long text markup in the row shoved the staves apart even when it was
+        # invisible.
+        r"  \override TextScript.stencil = ##f",
+        r"  \override TextSpanner.stencil = ##f",
+        r"  \override DynamicText.stencil = ##f",
+        r"  \override DynamicTextSpanner.stencil = ##f",
+        r"  \override Hairpin.stencil = ##f",
+        r"  \override Script.stencil = ##f",
+        r"  \override OttavaBracket.stencil = ##f",
         # Multi-voice moments (two voices merged into one note-name column,
         # e.g. a melody note + a chord in the other voice) otherwise inherit
         # a noticeably larger ambient font-size than single-voice moments do,
@@ -491,6 +604,9 @@ def build_preamble(config):
     parts.append(_QUALITY_CIRCLE_TEMPLATE if quality_on else _NOOP_QUALITY_CIRCLE)
     parts.append(_NOTE_STACK_TEMPLATE if stack_on else _NOOP_NOTE_STACK)
 
+    if config["page"]["measuresPerLine"] is not None:
+        parts.append(_BREAK_ENGRAVER_TEMPLATE)
+
     return "\n".join(parts)
 
 
@@ -509,6 +625,76 @@ def build_header(title, composer):
     return "\n".join(lines)
 
 
+def build_page_setup(config):
+    r"""Top-level paper-size/staff-size settings — must precede the \paper block.
+
+    Both default to large print (landscape letter, staff size 24) rather than
+    LilyPond's portrait/20, since these scores are read off a music stand.
+
+    Landscape is requested as the "<size>landscape" paper name rather than
+    LilyPond's `'landscape` symbol argument: the symbol keeps a portrait
+    MediaBox and rotates the content inside it (which viewers show sideways),
+    while the name form emits a genuinely landscape page.
+    """
+    page = config["page"]
+    suffix = "landscape" if page["orientation"] == "landscape" else ""
+    size = page["staffSize"]
+    size_literal = f"{size:g}"
+    return "\n".join(
+        [
+            f'#(set-default-paper-size "{_ly_escape(page["paperSize"])}{suffix}")',
+            # Scales everything — staves, noteheads, note-name row, markup text.
+            f"#(set-global-staff-size {size_literal})",
+        ]
+    )
+
+
+def build_score_block(config):
+    page = config["page"]
+
+    paper_lines = []
+    if page["systemsPerPage"] is not None:
+        paper_lines.append(f"  systems-per-page = #{page['systemsPerPage']}")
+    if page["pageNumbers"]:
+        # Two departures from LilyPond's defaults, both for the same reason —
+        # these come out of the printer as a stack of loose single-sided sheets
+        # that get shuffled on a music stand, not as a bound double-sided book.
+        # LilyPond skips the number on page 1 (the title page convention) and
+        # alternates it left/right for facing pages; here every page is numbered
+        # and the number stays in the same corner, so it's findable at a glance.
+        # evenHeaderMarkup is the default oddHeaderMarkup verbatim (see
+        # LilyPond's titling-init.ly) — keeping \should-print-page-number means
+        # the print-page-number settings above still govern it.
+        paper_lines.append("  print-page-number = ##t")
+        paper_lines.append("  print-first-page-number = ##t")
+        paper_lines.append("  evenHeaderMarkup = \\markup \\fill-line {")
+        paper_lines.append('    ""')
+        paper_lines.append(
+            "    \\unless \\on-first-page-of-part \\fromproperty #'header:instrument"
+        )
+        paper_lines.append(
+            "    \\if \\should-print-page-number \\fromproperty #'page:page-number-string"
+        )
+        paper_lines.append("  }")
+    else:
+        paper_lines.append("  print-page-number = ##f")
+    paper_extra = "".join(f"{line}\n" for line in paper_lines)
+
+    layout_extra = " "
+    if page["measuresPerLine"] is not None:
+        layout_extra = (
+            "\n    \\context {\n"
+            "      \\Score\n"
+            "      \\override NonMusicalPaperColumn.line-break-permission = ##f\n"
+            f"      \\consists #(break-every-n-bars {page['measuresPerLine']})\n"
+            "    }\n  "
+        )
+
+    return _SCORE_BLOCK.replace("__PAPER_EXTRA__", paper_extra).replace(
+        "__LAYOUT_EXTRA__", layout_extra
+    )
+
+
 def build_color_legend(config):
     return _LEGEND_TEMPLATE.replace(
         "__LEGEND_LINES__", _scheme_legend_lines(config["colors"]["colordict"])
@@ -521,8 +707,22 @@ def build_color_legend(config):
 
 
 def render(
-    input_path, config_path, output_path, *, title=None, composer=None, lilypond_bin="lilypond"
+    input_path,
+    config_path,
+    output_path,
+    *,
+    title=None,
+    composer=None,
+    lilypond_bin="lilypond",
+    page_overrides=None,
 ):
+    """Render a voices .ly file to an annotated PDF, writing the combined .ly beside it.
+
+    page_overrides is the `page` section of config.json partially overridden —
+    see cmd_render. Layout defaults to large print; how many measures fit a row
+    depends on how densely the piece is written, so a dense piece may need a
+    lower measuresPerLine or `systemsPerPage: null`.
+    """
     voices_path = Path(input_path)
     if not voices_path.exists():
         raise SystemExit(f"error: input file not found: {voices_path}")
@@ -537,7 +737,7 @@ def render(
 
     if config_path is None and Path("config.json").exists():
         config_path = "config.json"
-    config = load_config(config_path)
+    config = load_config(config_path, page_overrides=page_overrides)
 
     out_path = Path(output_path).with_suffix(".pdf")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -557,10 +757,11 @@ def render(
         part
         for part in [
             '\\version "2.26.0"',
+            build_page_setup(config),
             build_header(title, composer),
             build_preamble(config),
             voices_text,
-            _SCORE_BLOCK,
+            build_score_block(config),
             build_color_legend(config) if config["colors"]["enabled"] else "",
         ]
         if part
@@ -1022,6 +1223,24 @@ downMusic = {
 
 
 def cmd_render(args):
+    # Only flags actually given end up in the overrides, so anything left off
+    # keeps whatever config.json (or the built-in default) says. 0 is the
+    # command-line spelling of "automatic" for the two count flags, since
+    # there's no way to type JSON's null as an argparse int.
+    page_overrides = {}
+    if args.orientation is not None:
+        page_overrides["orientation"] = args.orientation
+    if args.paper_size is not None:
+        page_overrides["paperSize"] = args.paper_size
+    if args.staff_size is not None:
+        page_overrides["staffSize"] = args.staff_size
+    if args.systems_per_page is not None:
+        page_overrides["systemsPerPage"] = args.systems_per_page or None
+    if args.measures_per_line is not None:
+        page_overrides["measuresPerLine"] = args.measures_per_line or None
+    if args.page_numbers is not None:
+        page_overrides["pageNumbers"] = args.page_numbers
+
     render(
         args.input,
         args.config,
@@ -1029,6 +1248,7 @@ def cmd_render(args):
         title=args.title,
         composer=args.composer,
         lilypond_bin=args.lilypond,
+        page_overrides=page_overrides,
     )
 
 
@@ -1075,6 +1295,61 @@ def main():
     p_render.add_argument("--title", default=None, help="score title")
     p_render.add_argument("--composer", default=None, help="score composer credit")
     p_render.add_argument("--lilypond", default="lilypond", help="lilypond binary to invoke")
+
+    layout = p_render.add_argument_group(
+        "page layout", "overrides for the config.json `page` section"
+    )
+    orientation = layout.add_mutually_exclusive_group()
+    orientation.add_argument(
+        "--landscape",
+        dest="orientation",
+        action="store_const",
+        const="landscape",
+        help="wide pages: fewer, larger measures per row (default)",
+    )
+    orientation.add_argument(
+        "--portrait",
+        dest="orientation",
+        action="store_const",
+        const="portrait",
+        help="tall pages, LilyPond's usual shape",
+    )
+    layout.add_argument(
+        "--paper-size", default=None, help="LilyPond paper size name (e.g. letter, a4)"
+    )
+    layout.add_argument(
+        "--staff-size",
+        type=float,
+        default=None,
+        help="global staff size — scales staves, noteheads, note names, and text (default: 24)",
+    )
+    layout.add_argument(
+        "--systems-per-page",
+        type=int,
+        default=None,
+        help="fixed number of staff rows per page (default: 2; 0 = let LilyPond decide)",
+    )
+    numbers = layout.add_mutually_exclusive_group()
+    numbers.add_argument(
+        "--page-numbers",
+        dest="page_numbers",
+        action="store_true",
+        default=None,
+        help="print a page number on every page, including the first (default)",
+    )
+    numbers.add_argument(
+        "--no-page-numbers",
+        dest="page_numbers",
+        action="store_false",
+        default=None,
+        help="print no page numbers at all",
+    )
+    layout.add_argument(
+        "--measures-per-line",
+        type=int,
+        default=None,
+        help="fixed number of measures per row (default: 5; 0 = let LilyPond decide)",
+    )
     p_render.set_defaults(func=cmd_render)
 
     p_excerpt = sub.add_parser(

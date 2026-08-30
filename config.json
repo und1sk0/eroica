@@ -25,5 +25,13 @@
   },
   "chordNoteStack": {
     "enabled": true
+  },
+  "page": {
+    "orientation": "landscape",
+    "paperSize": "letter",
+    "staffSize": 24,
+    "systemsPerPage": 2,
+    "measuresPerLine": 5,
+    "pageNumbers": true
   }
 }

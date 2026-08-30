@@ -56,6 +56,83 @@ Mutopia `.ly` file is never usable as-is. Adapting one means:
   were unaffected, which is why it went unnoticed. Fixed in
   `fix/color-polyphonic-voices`.
 
+## The note-name row replays the music
+
+Both the Staff and its NoteNames row are handed the *same* `upMusic` /
+`downMusic`, so anything the voices.ly attaches to a note is engraved twice —
+dynamics, hairpins, articulations, `\ottava` brackets, and text directions
+like Für Elise's `\pp` or Clair de Lune's "con sordina", which printed once
+under the staff and again inside the note-name row. `build_preamble` kills
+them there with `#f` stencils (not transparency: an invisible markup still
+reserves height and shoves the staves apart). The chord-quality circles are
+safe because `\chordNames` is only ever applied to the Staff copy of the
+music, never to the NoteNames copy.
+
+## Page layout (landscape / large print, `page` config section)
+
+Three separate LilyPond mechanisms, each with a trap:
+
+- **Landscape** is emitted as the paper-size *name*
+  (`#(set-default-paper-size "letterlandscape")`), never as the symbol form
+  `#(set-default-paper-size "letter" 'landscape)`. The symbol form keeps a
+  portrait MediaBox (612x792) and rotates the content inside it, so viewers
+  show the music sideways on a portrait page; the name form emits a real
+  landscape page (792x612) with upright content. Verified by reading the
+  MediaBox out of both PDFs.
+- **Scale** is `#(set-global-staff-size N)`, and it is the only knob that
+  makes things bigger — noteheads, the NoteNames row, chord-quality circles,
+  and the legend are all sized relative to it, so nothing needs to be scaled
+  separately. Both settings are top-level and must precede the `\paper`
+  block (see `build_page_setup`).
+- **Fixed measures per line** needs *two* cooperating pieces, and is silently
+  wrong with only one: the `break-every-n-bars` engraver forces a break at
+  every Nth measure start, and `\override
+  NonMusicalPaperColumn.line-break-permission = ##f` forbids breaks anywhere
+  else. Without the override, LilyPond still breaks wherever it likes and "3
+  per line" comes out as "at most 3" (Für Elise rendered a lone 1-measure
+  row). The engraver counts *bar starts* it has seen rather than testing
+  `currentBarNumber mod n`, because a piece can renumber mid-measure via
+  `\set Timing.measurePosition` (Für Elise does, around its first
+  alternative ending), and it deliberately never forces at the first bar
+  start — otherwise a `\partial` pickup gets stranded alone on row one.
+  A measure start is detected as `(zero? (ly:moment-main pos))`, **not**
+  `(equal? ZERO-MOMENT pos)`: a grace note before a barline shares the main
+  position and carries a negative grace part, so the whole-moment test skips
+  every measure that opens with a grace. Gnossienne No. 1, where most of them
+  do, rendered "5 measures per row" as 25.
+
+`systems-per-page` is a hard override, not a hint: LilyPond will put N
+systems on a page whether or not they fit, and the overflow is silent — no
+warning, exit 0, and the bottom NoteNames row simply gets cut off by the page
+edge. Landscape makes this easy to hit, since the page is ~200pt shorter
+while an annotated system (staff + note-name row per hand, plus chord circles
+above and stacked-chord circles below) is exactly as tall as before. Clair de
+Lune at staff size 26 needed 2 systems/page to look right and clipped 8 of 18
+pages doing it; staff size 20 fits 2/page with ~15-30pt to spare. Check for
+this by rasterizing pages and measuring where the ink stops (a bottom margin
+of 0 means clipped) — eyeballing page 1 won't catch it, since the pages that
+clip are the annotation-dense ones in the middle.
+
+Page numbers (`page.pageNumbers`, on by default) depart from LilyPond twice,
+both times because these print as loose single-sided sheets rather than a
+bound book: `print-first-page-number` numbers page 1, and `evenHeaderMarkup`
+is redefined as a copy of the default `oddHeaderMarkup` so the number stays in
+the same corner instead of alternating for facing pages. That copy keeps
+`\if \should-print-page-number`, so `print-page-number` still governs it —
+drop that and `--no-page-numbers` would silently stop working on even pages.
+
+The shipped defaults are large print, not LilyPond's: landscape letter, staff
+size 24, `measuresPerLine` 5, `systemsPerPage` 2. Those numbers were tuned on
+Satie's Gymnopédie No. 1 (a few events per bar) and are **not** universal —
+measures per row is really a function of how densely the piece is written.
+Clair de Lune under the stock defaults clips 4 of 8 pages, since two of its
+annotation-dense rows do not fit a landscape page; it wants
+`--systems-per-page 0` (15 clean pages) or `--measures-per-line 3
+--staff-size 20` (13 clean pages, tighter). Setting `page` back to portrait /
+20 / null / null reproduces pre-feature geometry exactly, byte-identical
+score body — only the `\paper` block differs, carrying the page-number
+settings.
+
 ## Excerpt/duration engine (eroica.py, "Auto-excerpt by duration" section)
 
 - Everything is computed on **repeat-unfolded, text-sliced** music — the
